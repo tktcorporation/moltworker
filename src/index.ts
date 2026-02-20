@@ -234,13 +234,17 @@ app.all('*', async (c) => {
 
   console.log('[PROXY] Handling request:', url.pathname);
 
+  // Inject gateway token into the URL for all requests to the container.
+  // CF Access already authenticates the user, so we always inject the token server-side.
+  const isWebSocketRequest = request.headers.get('Upgrade')?.toLowerCase() === 'websocket';
+  const acceptsHtml = request.headers.get('Accept')?.includes('text/html');
+  if (c.env.MOLTBOT_GATEWAY_TOKEN && !url.searchParams.has('token')) {
+    url.searchParams.set('token', c.env.MOLTBOT_GATEWAY_TOKEN);
+  }
+
   // Check if gateway is already running
   const existingProcess = await findExistingMoltbotProcess(sandbox);
   const isGatewayReady = existingProcess !== null && existingProcess.status === 'running';
-
-  // For browser requests (non-WebSocket, non-API), show loading page if gateway isn't ready
-  const isWebSocketRequest = request.headers.get('Upgrade')?.toLowerCase() === 'websocket';
-  const acceptsHtml = request.headers.get('Accept')?.includes('text/html');
 
   if (!isGatewayReady && !isWebSocketRequest && acceptsHtml) {
     console.log('[PROXY] Gateway not ready, serving loading page');
@@ -290,15 +294,8 @@ app.all('*', async (c) => {
       console.log('[WS] URL:', url.pathname + redactedSearch);
     }
 
-    // Inject gateway token into WebSocket request if not already present.
-    // CF Access redirects strip query params, so authenticated users lose ?token=.
-    // Since the user already passed CF Access auth, we inject the token server-side.
-    let wsRequest = request;
-    if (c.env.MOLTBOT_GATEWAY_TOKEN && !url.searchParams.has('token')) {
-      const tokenUrl = new URL(url.toString());
-      tokenUrl.searchParams.set('token', c.env.MOLTBOT_GATEWAY_TOKEN);
-      wsRequest = new Request(tokenUrl.toString(), request);
-    }
+    // Use the token-injected URL for WebSocket connection to the container.
+    const wsRequest = new Request(url.toString(), request);
 
     // Get WebSocket connection to the container
     const containerResponse = await sandbox.wsConnect(wsRequest, MOLTBOT_PORT);
@@ -387,11 +384,15 @@ app.all('*', async (c) => {
     });
 
     // Handle close events
+    // Note: codes 1005 and 1006 are reserved and cannot be used in close().
+    // 1005 = no status code present, 1006 = abnormal closure (no close frame).
+    const sanitizeCloseCode = (code: number) => (code === 1005 || code === 1006 ? 1000 : code);
+
     serverWs.addEventListener('close', (event) => {
       if (debugLogs) {
         console.log('[WS] Client closed:', event.code, event.reason);
       }
-      containerWs.close(event.code, event.reason);
+      containerWs.close(sanitizeCloseCode(event.code), event.reason);
     });
 
     containerWs.addEventListener('close', (event) => {
@@ -406,7 +407,7 @@ app.all('*', async (c) => {
       if (debugLogs) {
         console.log('[WS] Transformed close reason:', reason);
       }
-      serverWs.close(event.code, reason);
+      serverWs.close(sanitizeCloseCode(event.code), reason);
     });
 
     // Handle errors
@@ -430,7 +431,8 @@ app.all('*', async (c) => {
   }
 
   console.log('[HTTP] Proxying:', url.pathname + url.search);
-  const httpResponse = await sandbox.containerFetch(request, MOLTBOT_PORT);
+  const httpRequest = new Request(url.toString(), request);
+  const httpResponse = await sandbox.containerFetch(httpRequest, MOLTBOT_PORT);
   console.log('[HTTP] Response status:', httpResponse.status);
 
   // Add debug header to verify worker handled the request

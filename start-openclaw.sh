@@ -114,6 +114,9 @@ if [ ! -f "$CONFIG_FILE" ]; then
         AUTH_ARGS="--auth-choice apiKey --anthropic-api-key $ANTHROPIC_API_KEY"
     elif [ -n "$OPENAI_API_KEY" ]; then
         AUTH_ARGS="--auth-choice openai-api-key --openai-api-key $OPENAI_API_KEY"
+    elif [ -n "$OPENROUTER_API_KEY" ]; then
+        # OpenRouter is OpenAI-compatible; use it as an OpenAI provider
+        AUTH_ARGS="--auth-choice openai-api-key --openai-api-key $OPENROUTER_API_KEY"
     fi
 
     openclaw onboard --non-interactive --accept-risk \
@@ -188,10 +191,14 @@ if (process.env.CF_AI_GATEWAY_MODEL) {
 
     const accountId = process.env.CF_AI_GATEWAY_ACCOUNT_ID;
     const gatewayId = process.env.CF_AI_GATEWAY_GATEWAY_ID;
-    const apiKey = process.env.CLOUDFLARE_AI_GATEWAY_API_KEY;
+    const apiKey = process.env.CLOUDFLARE_AI_GATEWAY_API_KEY
+        || (gwProvider === 'openrouter' ? process.env.OPENROUTER_API_KEY : undefined);
 
     let baseUrl;
-    if (accountId && gatewayId) {
+    if (gwProvider === 'openrouter') {
+        // OpenRouter is not a native CF AI Gateway provider; use its API directly
+        baseUrl = 'https://openrouter.ai/api/v1';
+    } else if (accountId && gatewayId) {
         baseUrl = 'https://gateway.ai.cloudflare.com/v1/' + accountId + '/' + gatewayId + '/' + gwProvider;
         if (gwProvider === 'workers-ai') baseUrl += '/v1';
     } else if (gwProvider === 'workers-ai' && process.env.CF_ACCOUNT_ID) {
