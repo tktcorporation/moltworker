@@ -26,6 +26,43 @@ echo "Config directory: $CONFIG_DIR"
 mkdir -p "$CONFIG_DIR"
 
 # ============================================================
+# GOGCLI SETUP
+# ============================================================
+
+GOG_CONFIG_DIR="/root/.config/gogcli"
+
+install_gogcli() {
+    if command -v gog &>/dev/null; then
+        echo "gogcli already installed: $(gog --version 2>/dev/null || echo 'unknown')"
+        return
+    fi
+
+    echo "Installing gogcli..."
+    local ARCH
+    ARCH=$(uname -m)
+    case "$ARCH" in
+        x86_64) ARCH="amd64" ;;
+        aarch64) ARCH="arm64" ;;
+    esac
+
+    local OS
+    OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+
+    local DOWNLOAD_URL="https://github.com/steipete/gogcli/releases/latest/download/gog_${OS}_${ARCH}"
+    echo "Downloading gogcli from: $DOWNLOAD_URL"
+
+    if curl -fsSL "$DOWNLOAD_URL" -o /usr/local/bin/gog; then
+        chmod +x /usr/local/bin/gog
+        echo "gogcli installed: $(gog --version 2>/dev/null || echo 'installed')"
+    else
+        echo "WARNING: Failed to download gogcli, Google services will not be available"
+    fi
+}
+
+install_gogcli
+mkdir -p "$GOG_CONFIG_DIR"
+
+# ============================================================
 # RCLONE SETUP
 # ============================================================
 
@@ -93,6 +130,15 @@ if r2_configured; then
         mkdir -p "$SKILLS_DIR"
         rclone copy "r2:${R2_BUCKET}/skills/" "$SKILLS_DIR/" $RCLONE_FLAGS -v 2>&1 || echo "WARNING: skills restore failed with exit code $?"
         echo "Skills restored"
+    fi
+
+    # Restore gogcli config (OAuth tokens)
+    REMOTE_GOG_COUNT=$(rclone ls "r2:${R2_BUCKET}/gogcli/" $RCLONE_FLAGS 2>/dev/null | wc -l)
+    if [ "$REMOTE_GOG_COUNT" -gt 0 ]; then
+        echo "Restoring gogcli config from R2 ($REMOTE_GOG_COUNT files)..."
+        mkdir -p "$GOG_CONFIG_DIR"
+        rclone copy "r2:${R2_BUCKET}/gogcli/" "$GOG_CONFIG_DIR/" $RCLONE_FLAGS -v 2>&1 || echo "WARNING: gogcli config restore failed with exit code $?"
+        echo "gogcli config restored"
     fi
 else
     echo "R2 not configured, starting fresh"
@@ -267,9 +313,39 @@ if (process.env.SLACK_BOT_TOKEN && process.env.SLACK_APP_TOKEN) {
     };
 }
 
+// gogcli MCP server configuration
+if (process.env.GOG_KEYRING_PASSWORD) {
+    config.agents = config.agents || {};
+    config.agents.list = config.agents.list || [{ id: 'main' }];
+    const mainAgent = config.agents.list.find(a => a.id === 'main') || config.agents.list[0];
+    mainAgent.mcp = mainAgent.mcp || {};
+    mainAgent.mcp.servers = mainAgent.mcp.servers || [];
+    const hasGogcli = mainAgent.mcp.servers.some(s => s.name === 'google');
+    if (!hasGogcli) {
+        mainAgent.mcp.servers.push({
+            name: 'google',
+            command: 'node',
+            args: ['/usr/local/lib/gogcli-mcp/dist/server.js'],
+        });
+        console.log('Added gogcli MCP server to agent config');
+    }
+}
+
 fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
 console.log('Configuration patched successfully');
 EOFPATCH
+
+# ============================================================
+# GOGCLI AUTH SETUP (if credentials provided via env)
+# ============================================================
+if [ -n "$GOG_OAUTH_CREDENTIALS" ] && [ ! -f "$GOG_CONFIG_DIR/config.json" ]; then
+    echo "Setting up gogcli OAuth credentials from env..."
+    CREDS_FILE="/tmp/gog-credentials.json"
+    echo "$GOG_OAUTH_CREDENTIALS" > "$CREDS_FILE"
+    gog auth credentials "$CREDS_FILE" 2>&1 || echo "WARNING: gogcli credentials setup failed"
+    rm -f "$CREDS_FILE"
+    echo "gogcli credentials configured (run 'gog auth add email' to complete setup)"
+fi
 
 # ============================================================
 # BACKGROUND SYNC LOOP
@@ -291,6 +367,7 @@ if r2_configured; then
                     -not -path '*/node_modules/*' \
                     -not -path '*/.git/*' \
                     -type f -printf '%P\n' 2>/dev/null
+                find "$GOG_CONFIG_DIR" -newer "$MARKER" -type f -printf '%P\n' 2>/dev/null
             } > "$CHANGED"
 
             COUNT=$(wc -l < "$CHANGED" 2>/dev/null || echo 0)
@@ -305,6 +382,10 @@ if r2_configured; then
                 fi
                 if [ -d "$SKILLS_DIR" ]; then
                     rclone sync "$SKILLS_DIR/" "r2:${R2_BUCKET}/skills/" \
+                        $RCLONE_FLAGS 2>> "$LOGFILE"
+                fi
+                if [ -d "$GOG_CONFIG_DIR" ]; then
+                    rclone sync "$GOG_CONFIG_DIR/" "r2:${R2_BUCKET}/gogcli/" \
                         $RCLONE_FLAGS 2>> "$LOGFILE"
                 fi
                 date -Iseconds > "$LAST_SYNC_FILE"

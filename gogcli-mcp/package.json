@@ -1,0 +1,23 @@
+{
+  "name": "gogcli-mcp",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "description": "MCP server wrapping gogcli for Google service access",
+  "main": "dist/server.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.25.0",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0",
+    "vitest": "^4.0.0",
+    "@types/node": "^22.0.0"
+  }
+}
