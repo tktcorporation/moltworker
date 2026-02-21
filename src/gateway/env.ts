@@ -56,5 +56,12 @@ export function buildEnvVars(env: MoltbotEnv): Record<string, string> {
   if (env.R2_SECRET_ACCESS_KEY) envVars.R2_SECRET_ACCESS_KEY = env.R2_SECRET_ACCESS_KEY;
   if (env.R2_BUCKET_NAME) envVars.R2_BUCKET_NAME = env.R2_BUCKET_NAME;
 
+  // gogcli (Google Suite CLI) credentials
+  if (env.GOG_KEYRING_PASSWORD) {
+    envVars.GOG_KEYRING_PASSWORD = env.GOG_KEYRING_PASSWORD;
+    envVars.GOG_KEYRING_BACKEND = 'file';
+  }
+  if (env.GOG_OAUTH_CREDENTIALS) envVars.GOG_OAUTH_CREDENTIALS = env.GOG_OAUTH_CREDENTIALS;
+
   return envVars;
 }

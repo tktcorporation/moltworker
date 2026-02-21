@@ -158,4 +158,23 @@ describe('buildEnvVars', () => {
       TELEGRAM_BOT_TOKEN: 'tg',
     });
   });
+
+  // gogcli env vars
+  it('passes GOG_KEYRING_PASSWORD to container', () => {
+    const env = createMockEnv({ GOG_KEYRING_PASSWORD: 'my-secret-pw' });
+    const result = buildEnvVars(env);
+    expect(result.GOG_KEYRING_PASSWORD).toBe('my-secret-pw');
+  });
+
+  it('passes GOG_OAUTH_CREDENTIALS to container', () => {
+    const env = createMockEnv({ GOG_OAUTH_CREDENTIALS: '{"installed":{}}' });
+    const result = buildEnvVars(env);
+    expect(result.GOG_OAUTH_CREDENTIALS).toBe('{"installed":{}}');
+  });
+
+  it('sets GOG_KEYRING_BACKEND to file when GOG_KEYRING_PASSWORD is set', () => {
+    const env = createMockEnv({ GOG_KEYRING_PASSWORD: 'pw' });
+    const result = buildEnvVars(env);
+    expect(result.GOG_KEYRING_BACKEND).toBe('file');
+  });
 });
