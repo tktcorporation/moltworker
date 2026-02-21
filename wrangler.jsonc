@@ -67,6 +67,10 @@
   "browser": {
     "binding": "BROWSER",
   },
+  // Cron trigger to keep the gateway alive and Discord bot connected
+  "triggers": {
+    "crons": ["0 * * * *"],
+  },
   // Note: CF_ACCOUNT_ID should be set via `wrangler secret put CF_ACCOUNT_ID`
   // Secrets to configure via `wrangler secret put`:
   //

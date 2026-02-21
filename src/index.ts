@@ -449,4 +449,14 @@ app.all('*', async (c) => {
 
 export default {
   fetch: app.fetch,
+  async scheduled(event: ScheduledEvent, env: MoltbotEnv, ctx: ExecutionContext) {
+    const options = buildSandboxOptions(env);
+    const sandbox = getSandbox(env.Sandbox, 'moltbot', options);
+    try {
+      await ensureMoltbotGateway(sandbox, env);
+      console.log('[CRON] Gateway is running');
+    } catch (error) {
+      console.error('[CRON] Failed to ensure gateway:', error);
+    }
+  },
 };
