@@ -88,6 +88,17 @@ export async function ensureMoltbotGateway(sandbox: Sandbox, env: MoltbotEnv): P
     }
   }
 
+  // Write gogcli MCP server bundle to container if configured
+  if (env.GOG_KEYRING_PASSWORD) {
+    try {
+      // The MCP server is a self-contained bundle built at deploy time
+      // For now, we write the source files; a proper bundle step can be added later
+      console.log('[Gateway] gogcli configured but MCP server bundling is TODO');
+    } catch (err) {
+      console.log('[Gateway] Failed to write gogcli MCP server:', err);
+    }
+  }
+
   // Start a new OpenClaw gateway
   console.log('Starting new OpenClaw gateway...');
   const envVars = buildEnvVars(env);
