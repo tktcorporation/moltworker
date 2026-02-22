@@ -325,7 +325,13 @@ app.all('*', async (c) => {
       console.log('[WS] serverWs.readyState:', serverWs.readyState);
     }
 
-    // Relay messages from client to container
+    // Relay messages from client to container, injecting gateway token into connect requests.
+    // The OpenClaw gateway validates the token at the protocol level (in the "connect" message),
+    // not at the WebSocket URL level. The browser-side Control UI normally reads the token from
+    // the page URL (?token=...) and includes it in the connect params, but when proxied through
+    // this Worker the browser URL doesn't contain the token — only the Worker-to-container URL does.
+    // So we inject it here to ensure all clients (mobile, PC, etc.) authenticate correctly.
+    const gatewayToken = c.env.MOLTBOT_GATEWAY_TOKEN;
     serverWs.addEventListener('message', (event) => {
       if (debugLogs) {
         console.log(
@@ -334,8 +340,29 @@ app.all('*', async (c) => {
           typeof event.data === 'string' ? event.data.slice(0, 200) : '(binary)',
         );
       }
+
+      let data = event.data;
+
+      // Inject gateway token into "connect" request params so the gateway accepts the connection.
+      if (gatewayToken && typeof data === 'string') {
+        try {
+          const parsed = JSON.parse(data);
+          if (parsed.type === 'req' && parsed.method === 'connect' && parsed.params) {
+            if (!parsed.params.token) {
+              parsed.params.token = gatewayToken;
+              data = JSON.stringify(parsed);
+              if (debugLogs) {
+                console.log('[WS] Injected gateway token into connect request');
+              }
+            }
+          }
+        } catch {
+          // Not JSON, forward as-is
+        }
+      }
+
       if (containerWs.readyState === WebSocket.OPEN) {
-        containerWs.send(event.data);
+        containerWs.send(data);
       } else if (debugLogs) {
         console.log('[WS] Container not open, readyState:', containerWs.readyState);
       }
