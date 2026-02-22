@@ -198,14 +198,22 @@ CRON_DIR="$CONFIG_DIR/cron"
 
 if [ -d "$GIT_BASE" ]; then
     # Reconcile cron jobs
-    if [ -f "$GIT_BASE/jobs.json" ]; then
-        echo "Reconciling git-managed cron jobs..."
+    # r2-state/ のディレクトリ構造が openclaw/cron/jobs.json になったのでパスを合わせる
+    GIT_JOBS_FILE="$GIT_BASE/openclaw/cron/jobs.json"
+    # 旧構造 (r2-state/jobs.json) にもフォールバック
+    if [ ! -f "$GIT_JOBS_FILE" ] && [ -f "$GIT_BASE/jobs.json" ]; then
+        GIT_JOBS_FILE="$GIT_BASE/jobs.json"
+    fi
+    if [ -f "$GIT_JOBS_FILE" ]; then
+        echo "Reconciling git-managed cron jobs from $GIT_JOBS_FILE..."
         mkdir -p "$CRON_DIR"
+        export GIT_JOBS_FILE
         node << 'EOFRECONCILE'
 const fs = require('fs');
 const crypto = require('crypto');
 
-const GIT_JOBS_PATH = '/usr/local/etc/openclaw-base/jobs.json';
+// GIT_JOBS_FILE 環境変数でパスを受け取る（シェル側でフォールバック済み）
+const GIT_JOBS_PATH = process.env.GIT_JOBS_FILE || '/usr/local/etc/openclaw-base/openclaw/cron/jobs.json';
 const RUNTIME_JOBS_PATH = '/root/.openclaw/cron/jobs.json';
 
 const gitJobs = JSON.parse(fs.readFileSync(GIT_JOBS_PATH, 'utf8'));
@@ -271,10 +279,21 @@ EOFRECONCILE
     fi
 
     # Apply git-managed workspace files
-    if [ -d "$GIT_BASE/workspace" ] && [ "$(ls -A "$GIT_BASE/workspace" 2>/dev/null)" ]; then
+    # 新構造: r2-state/workspace/ → /usr/local/etc/openclaw-base/workspace/
+    GIT_WS_DIR="$GIT_BASE/workspace"
+    if [ -d "$GIT_WS_DIR" ] && [ "$(ls -A "$GIT_WS_DIR" 2>/dev/null)" ]; then
         echo "Applying git-managed workspace files..."
         mkdir -p "$WORKSPACE_DIR"
-        cp -v "$GIT_BASE/workspace/"* "$WORKSPACE_DIR/" 2>/dev/null || true
+        cp -rv "$GIT_WS_DIR/"* "$WORKSPACE_DIR/" 2>/dev/null || true
+    fi
+
+    # Apply git-managed skills
+    # r2-state/skills/ が存在すれば、コンテナの skills ディレクトリにコピー
+    GIT_SKILLS_DIR="$GIT_BASE/skills"
+    if [ -d "$GIT_SKILLS_DIR" ] && [ "$(ls -A "$GIT_SKILLS_DIR" 2>/dev/null)" ]; then
+        echo "Applying git-managed skills..."
+        mkdir -p "$SKILLS_DIR"
+        cp -rv "$GIT_SKILLS_DIR/"* "$SKILLS_DIR/" 2>/dev/null || true
     fi
 fi
 
