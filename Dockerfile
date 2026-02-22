@@ -36,6 +36,12 @@ RUN mkdir -p /root/.openclaw \
 COPY start-openclaw.sh /usr/local/bin/start-openclaw.sh
 RUN chmod +x /usr/local/bin/start-openclaw.sh
 
+# Copy git-managed base state (cron jobs, workspace files)
+# R2 ↔ Git 双方向同期の一部: GitHub Actions が R2 から取得したデータを r2-state/ に配置し、
+# ここでコンテナイメージに焼き込む。start-openclaw.sh の reconcile セクションが
+# この base state と R2 から復元された runtime state をマージする。
+COPY r2-state/ /usr/local/etc/openclaw-base/
+
 # Copy custom skills
 COPY skills/ /root/clawd/skills/
 

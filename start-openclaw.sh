@@ -180,6 +180,105 @@ else
 fi
 
 # ============================================================
+# RECONCILE GIT-MANAGED FILES
+# ============================================================
+# R2 ↔ Git 双方向同期の「Git → コンテナ」方向の処理。
+#
+# 背景: cronジョブの wakeMode が "next-heartbeat" のままだと Sandbox 環境では
+# 実行されない問題があった。git で wakeMode を "now" に修正しても、R2 から復元された
+# 古い設定で上書きされてしまう。このreconcileにより git の設定が確実に反映される。
+#
+# マージ戦略:
+# - 同名ジョブ: git の設定 (schedule, wakeMode, payload) が優先、R2 の state (lastRun, nextRun) は保持
+# - git のみ: 新規ジョブとして追加
+# - R2 のみ: ユーザーがチャットで作成したジョブなので、そのまま保持
+
+GIT_BASE="/usr/local/etc/openclaw-base"
+CRON_DIR="$CONFIG_DIR/cron"
+
+if [ -d "$GIT_BASE" ]; then
+    # Reconcile cron jobs
+    if [ -f "$GIT_BASE/jobs.json" ]; then
+        echo "Reconciling git-managed cron jobs..."
+        mkdir -p "$CRON_DIR"
+        node << 'EOFRECONCILE'
+const fs = require('fs');
+const crypto = require('crypto');
+
+const GIT_JOBS_PATH = '/usr/local/etc/openclaw-base/jobs.json';
+const RUNTIME_JOBS_PATH = '/root/.openclaw/cron/jobs.json';
+
+const gitJobs = JSON.parse(fs.readFileSync(GIT_JOBS_PATH, 'utf8'));
+let runtimeJobs = [];
+if (fs.existsSync(RUNTIME_JOBS_PATH)) {
+    try {
+        runtimeJobs = JSON.parse(fs.readFileSync(RUNTIME_JOBS_PATH, 'utf8'));
+        // Handle both array and {jobs: [...]} formats
+        if (runtimeJobs.jobs) runtimeJobs = runtimeJobs.jobs;
+    } catch (e) {
+        console.log('Could not parse existing jobs.json, starting fresh');
+    }
+}
+
+const gitByName = new Map(gitJobs.map(j => [j.name, j]));
+const merged = [];
+const seen = new Set();
+
+for (const rj of runtimeJobs) {
+    const gj = gitByName.get(rj.name);
+    if (gj) {
+        merged.push({
+            ...rj,
+            agentId: gj.agentId || rj.agentId,
+            enabled: gj.enabled !== undefined ? gj.enabled : rj.enabled,
+            schedule: gj.schedule,
+            sessionTarget: gj.sessionTarget,
+            wakeMode: gj.wakeMode,
+            payload: gj.payload,
+            delivery: gj.delivery || rj.delivery,
+            updatedAtMs: Date.now(),
+        });
+        seen.add(rj.name);
+    } else {
+        merged.push(rj);
+    }
+}
+
+for (const [name, gj] of gitByName) {
+    if (!seen.has(name)) {
+        const now = Date.now();
+        merged.push({
+            id: crypto.randomUUID(),
+            agentId: gj.agentId || 'main',
+            name: gj.name,
+            enabled: gj.enabled !== undefined ? gj.enabled : true,
+            createdAtMs: now,
+            updatedAtMs: now,
+            schedule: gj.schedule,
+            sessionTarget: gj.sessionTarget,
+            wakeMode: gj.wakeMode,
+            payload: gj.payload,
+            delivery: gj.delivery,
+            state: {},
+        });
+    }
+}
+
+fs.mkdirSync('/root/.openclaw/cron', { recursive: true });
+fs.writeFileSync(RUNTIME_JOBS_PATH, JSON.stringify(merged, null, 2));
+console.log('Cron reconcile: ' + merged.length + ' jobs (' + seen.size + ' updated, ' + (merged.length - runtimeJobs.length) + ' new)');
+EOFRECONCILE
+    fi
+
+    # Apply git-managed workspace files
+    if [ -d "$GIT_BASE/workspace" ] && [ "$(ls -A "$GIT_BASE/workspace" 2>/dev/null)" ]; then
+        echo "Applying git-managed workspace files..."
+        mkdir -p "$WORKSPACE_DIR"
+        cp -v "$GIT_BASE/workspace/"* "$WORKSPACE_DIR/" 2>/dev/null || true
+    fi
+fi
+
+# ============================================================
 # PATCH CONFIG (channels, gateway auth, trusted proxies)
 # ============================================================
 # openclaw onboard handles provider/model config, but we need to patch in:

@@ -126,9 +126,21 @@ debug.get('/gateway-api', async (c) => {
 });
 
 // GET /debug/cli - Test OpenClaw CLI commands
+// Automatically injects --url and --token for openclaw commands when not already present
 debug.get('/cli', async (c) => {
   const sandbox = c.get('sandbox');
-  const cmd = c.req.query('cmd') || 'openclaw --help';
+  let cmd = c.req.query('cmd') || 'openclaw --help';
+
+  // Auto-inject gateway URL and token for openclaw CLI commands
+  if (cmd.startsWith('openclaw ') && !cmd.includes('--help') && !cmd.includes('--version')) {
+    if (!cmd.includes('--url ')) {
+      cmd += ' --url ws://localhost:18789';
+    }
+    const token = c.env.MOLTBOT_GATEWAY_TOKEN;
+    if (token && !cmd.includes('--token ')) {
+      cmd += ` --token ${token}`;
+    }
+  }
 
   try {
     const proc = await sandbox.startProcess(cmd);
@@ -136,8 +148,10 @@ debug.get('/cli', async (c) => {
 
     const logs = await proc.getLogs();
     const status = proc.getStatus ? await proc.getStatus() : proc.status;
+    // Return original user command (not the one with injected token)
+    const userCmd = c.req.query('cmd') || 'openclaw --help';
     return c.json({
-      command: cmd,
+      command: userCmd,
       status,
       exitCode: proc.exitCode,
       stdout: logs.stdout || '',
