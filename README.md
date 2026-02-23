@@ -221,7 +221,8 @@ R2 storage uses a backup/restore approach for simplicity:
 - OpenClaw uses its default paths (no special configuration needed)
 
 **During operation:**
-- A cron job runs every 5 minutes to sync the moltbot config to R2
+- A background loop in the container syncs data to R2 every 30 seconds
+- A separate cron job runs every 5 minutes as a health check (restarts the gateway if it becomes unresponsive)
 - You can also trigger a manual backup from the admin UI at `/_admin/`
 
 **In the admin UI:**
@@ -258,9 +259,14 @@ The admin UI requires Cloudflare Access authentication (or `DEV_MODE=true` for l
 
 Debug endpoints are available at `/debug/*` when enabled (requires `DEBUG_ROUTES=true` and Cloudflare Access):
 
-- `GET /debug/processes` - List all container processes
-- `GET /debug/logs?id=<process_id>` - Get logs for a specific process
-- `GET /debug/version` - Get container and moltbot version info
+- `GET /debug/processes` - List all container processes (add `?logs=true` for stdout/stderr)
+- `GET /debug/logs?id=<process_id>` - Get logs for a specific process (or gateway if no id)
+- `GET /debug/version` - Get container and OpenClaw version info
+- `GET /debug/gateway-api?path=/` - Probe the gateway's internal HTTP API
+- `GET /debug/cli?cmd=openclaw+--help` - Run OpenClaw CLI commands (auto-injects `--url` and `--token`)
+- `GET /debug/env` - Show environment configuration (sanitized, no secret values)
+- `GET /debug/container-config` - Read the OpenClaw config JSON from the container
+- `GET /debug/ws-test` - Interactive WebSocket debug page
 
 ## Optional: Chat Channels
 
@@ -269,6 +275,13 @@ Debug endpoints are available at `/debug/*` when enabled (requires `DEBUG_ROUTES
 ```bash
 npx wrangler secret put TELEGRAM_BOT_TOKEN
 npm run deploy
+```
+
+To restrict DMs to specific Telegram users, set a comma-separated list of user IDs:
+
+```bash
+npx wrangler secret put TELEGRAM_DM_ALLOW_FROM
+# Enter: 123456789,987654321
 ```
 
 ### Discord
@@ -347,6 +360,25 @@ node /root/clawd/skills/cloudflare-browser/scripts/video.js "https://site1.com,h
 
 See `skills/cloudflare-browser/SKILL.md` for full documentation.
 
+### web-search
+
+Web search and page fetching without API keys. Uses DuckDuckGo's HTML endpoint (fast, ~1-2s) with automatic fallback to CDP browser search (handles CAPTCHAs and JS-heavy pages).
+
+**Scripts:**
+- `ddg-search.js` - Fast DuckDuckGo search (no dependencies, recommended first attempt)
+- `browser-search.js` - CDP browser-based search (requires `CDP_SECRET` and `WORKER_URL`)
+
+**Usage:**
+```bash
+# Search
+node skills/web-search/scripts/ddg-search.js "search query"
+
+# Fetch page content
+node skills/web-search/scripts/ddg-search.js --fetch https://example.com
+```
+
+See `skills/web-search/SKILL.md` for full documentation.
+
 ## Optional: Cloudflare AI Gateway
 
 You can route API requests through [Cloudflare AI Gateway](https://developers.cloudflare.com/ai-gateway/) for caching, rate limiting, analytics, and cost tracking. OpenClaw has native support for Cloudflare AI Gateway as a first-class provider.
@@ -408,6 +440,71 @@ With [Unified Billing](https://developers.cloudflare.com/ai-gateway/features/uni
 
 The previous `AI_GATEWAY_API_KEY` + `AI_GATEWAY_BASE_URL` approach is still supported for backward compatibility but is deprecated in favor of the native configuration above.
 
+## Optional: OpenRouter
+
+[OpenRouter](https://openrouter.ai/) provides access to many AI models through a single OpenAI-compatible API. To use it:
+
+```bash
+npx wrangler secret put OPENROUTER_API_KEY
+npm run deploy
+```
+
+OpenRouter is used as an OpenAI-compatible provider internally. It can also be routed through AI Gateway by setting `CF_AI_GATEWAY_MODEL` to `openrouter/model-name`.
+
+## Optional: Google Suite Integration (gogcli)
+
+[gogcli](https://github.com/steipete/gogcli) provides CLI access to Gmail, Google Calendar, Google Drive, and Google Tasks. The agent can use `gog` commands directly in the container.
+
+### Setup
+
+1. Install gogcli locally and authenticate:
+
+```bash
+# Install
+curl -fsSL https://github.com/steipete/gogcli/releases/latest/download/gog_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/') -o /usr/local/bin/gog && chmod +x /usr/local/bin/gog
+
+# Set up OAuth credentials (one-time)
+gog auth credentials /path/to/client_secret.json
+
+# Authenticate (opens browser)
+gog auth add your@gmail.com --services gmail,calendar,drive,tasks
+```
+
+2. Set the keyring password as a Worker secret:
+
+```bash
+npx wrangler secret put GOG_KEYRING_PASSWORD
+# Enter: your keyring encryption password
+```
+
+3. Upload the keyring to R2:
+
+```bash
+npx wrangler r2 object put "moltbot-data/gogcli/credentials.json" --file ~/.config/gogcli/credentials.json --remote
+npx wrangler r2 object put "moltbot-data/gogcli/keyring/token:default:your@gmail.com" --file ~/.config/gogcli/keyring/token:default:your@gmail.com --remote
+npx wrangler r2 object put "moltbot-data/gogcli/keyring/token:your@gmail.com" --file ~/.config/gogcli/keyring/token:your@gmail.com --remote
+```
+
+4. Deploy:
+
+```bash
+npm run deploy
+```
+
+The container automatically installs gogcli, restores the keyring from R2 on startup, and syncs changes back to R2 every 30 seconds.
+
+### Headless Re-authentication
+
+To update OAuth scopes from a headless environment (e.g., Codespaces), use the `--remote` flow:
+
+```bash
+# Step 1: Generate auth URL
+GOG_KEYRING_BACKEND=file GOG_KEYRING_PASSWORD=<password> gog auth add your@gmail.com --services tasks --force-consent --remote --step 1
+
+# Step 2: Visit the URL in a browser, authorize, then paste the callback URL
+GOG_KEYRING_BACKEND=file GOG_KEYRING_PASSWORD=<password> gog auth add your@gmail.com --services tasks --force-consent --remote --step 2 --auth-url '<callback-url>'
+```
+
 ## All Secrets Reference
 
 | Secret | Required | Description |
@@ -417,27 +514,33 @@ The previous `AI_GATEWAY_API_KEY` + `AI_GATEWAY_BASE_URL` approach is still supp
 | `CF_AI_GATEWAY_GATEWAY_ID` | Yes* | Your AI Gateway ID (used to construct the gateway URL) |
 | `CF_AI_GATEWAY_MODEL` | No | Override default model: `provider/model-id` (e.g. `workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast`). See [Choosing a Model](#choosing-a-model) |
 | `ANTHROPIC_API_KEY` | Yes* | Direct Anthropic API key (alternative to AI Gateway) |
-| `ANTHROPIC_BASE_URL` | No | Direct Anthropic API base URL |
+| `ANTHROPIC_BASE_URL` | No | Custom Anthropic API base URL (for proxy endpoints) |
 | `OPENAI_API_KEY` | No | OpenAI API key (alternative provider) |
+| `OPENROUTER_API_KEY` | No | [OpenRouter](https://openrouter.ai/) API key (OpenAI-compatible, supports many models) |
 | `AI_GATEWAY_API_KEY` | No | Legacy AI Gateway API key (deprecated, use `CLOUDFLARE_AI_GATEWAY_API_KEY` instead) |
 | `AI_GATEWAY_BASE_URL` | No | Legacy AI Gateway endpoint URL (deprecated) |
 | `CF_ACCESS_TEAM_DOMAIN` | Yes* | Cloudflare Access team domain (required for admin UI) |
 | `CF_ACCESS_AUD` | Yes* | Cloudflare Access application audience (required for admin UI) |
 | `MOLTBOT_GATEWAY_TOKEN` | Yes | Gateway token for authentication (pass via `?token=` query param) |
 | `DEV_MODE` | No | Set to `true` to skip CF Access auth + device pairing (local dev only) |
+| `E2E_TEST_MODE` | No | Set to `true` to skip CF Access auth but keep device pairing (for automated tests) |
 | `DEBUG_ROUTES` | No | Set to `true` to enable `/debug/*` routes |
 | `SANDBOX_SLEEP_AFTER` | No | Container sleep timeout: `never` (default) or duration like `10m`, `1h` |
 | `R2_ACCESS_KEY_ID` | No | R2 access key for persistent storage |
 | `R2_SECRET_ACCESS_KEY` | No | R2 secret key for persistent storage |
+| `R2_BUCKET_NAME` | No | Override R2 bucket name (default: `moltbot-data`) |
 | `CF_ACCOUNT_ID` | No | Cloudflare account ID (required for R2 storage) |
 | `TELEGRAM_BOT_TOKEN` | No | Telegram bot token |
 | `TELEGRAM_DM_POLICY` | No | Telegram DM policy: `pairing` (default) or `open` |
+| `TELEGRAM_DM_ALLOW_FROM` | No | Comma-separated Telegram user IDs allowed to DM |
 | `DISCORD_BOT_TOKEN` | No | Discord bot token |
 | `DISCORD_DM_POLICY` | No | Discord DM policy: `pairing` (default) or `open` |
 | `SLACK_BOT_TOKEN` | No | Slack bot token |
 | `SLACK_APP_TOKEN` | No | Slack app token |
 | `CDP_SECRET` | No | Shared secret for CDP endpoint authentication (see [Browser Automation](#optional-browser-automation-cdp)) |
 | `WORKER_URL` | No | Public URL of the worker (required for CDP) |
+| `GOG_KEYRING_PASSWORD` | No | Keyring encryption password for [gogcli](https://github.com/steipete/gogcli) (see [Google Suite Integration](#optional-google-suite-integration-gogcli)) |
+| `GOG_OAUTH_CREDENTIALS` | No | OAuth client JSON content for automated gogcli setup |
 
 ## Security Considerations
 
@@ -457,13 +560,15 @@ OpenClaw in Cloudflare Sandbox uses multiple authentication layers:
 
 **Gateway fails to start:** Check `npx wrangler secret list` and `npx wrangler tail`
 
+**Gateway crashes repeatedly (circuit breaker):** The watchdog has a built-in circuit breaker. If the gateway crashes 3 times within 30 seconds, it's treated as a configuration error and the watchdog stops restarting. Error details are written to `/tmp/gateway-startup-error` inside the container and shown on the loading page. Check `/api/status` for the `startup_failed` status and error details. This usually means R2-restored config contains keys that the current OpenClaw version doesn't recognize.
+
 **Config changes not working:** Edit the `# Build cache bust:` comment in `Dockerfile` and redeploy
 
 **Slow first request:** Cold starts take 1-2 minutes. Subsequent requests are faster.
 
 **R2 not mounting:** Check that all three R2 secrets are set (`R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `CF_ACCOUNT_ID`). Note: R2 mounting only works in production, not with `wrangler dev`.
 
-**Access denied on admin routes:** Ensure `CF_ACCESS_TEAM_DOMAIN` and `CF_ACCESS_AUD` are set, and that your Cloudflare Access application is configured correctly.
+**Access denied on admin routes:** Ensure `CF_ACCESS_TEAM_DOMAIN` and `CF_ACCESS_AUD` are set, and that your Cloudflare Access application is configured correctly. For automated tests, use `E2E_TEST_MODE=true` to skip CF Access auth.
 
 **Devices not appearing in admin UI:** Device list commands take 10-15 seconds due to WebSocket connection overhead. Wait and refresh.
 

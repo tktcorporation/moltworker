@@ -32,7 +32,8 @@ src/
 ├── routes/           # API route handlers
 │   ├── api.ts        # /api/* endpoints (devices, gateway)
 │   ├── admin.ts      # /_admin/* static file serving
-│   └── debug.ts      # /debug/* endpoints
+│   ├── debug.ts      # /debug/* endpoints
+│   └── public.ts     # Public routes (health check, /api/status, static assets)
 └── client/           # React admin UI (Vite)
     ├── App.tsx
     ├── api.ts        # API client
@@ -187,7 +188,8 @@ The startup script selects the auth choice based on which env vars are set:
 1. **Cloudflare AI Gateway** (native): `CLOUDFLARE_AI_GATEWAY_API_KEY` + `CF_AI_GATEWAY_ACCOUNT_ID` + `CF_AI_GATEWAY_GATEWAY_ID`
 2. **Direct Anthropic**: `ANTHROPIC_API_KEY` (optionally with `ANTHROPIC_BASE_URL`)
 3. **Direct OpenAI**: `OPENAI_API_KEY`
-4. **Legacy AI Gateway**: `AI_GATEWAY_API_KEY` + `AI_GATEWAY_BASE_URL` (routes through Anthropic base URL)
+4. **OpenRouter**: `OPENROUTER_API_KEY` (OpenAI-compatible, used as OpenAI provider internally)
+5. **Legacy AI Gateway**: `AI_GATEWAY_API_KEY` + `AI_GATEWAY_BASE_URL` (routes through Anthropic base URL)
 
 ### Container Environment Variables
 
@@ -202,10 +204,14 @@ These are the env vars passed TO the container (internal names):
 | `CF_AI_GATEWAY_GATEWAY_ID` | (env var) | Gateway ID for AI Gateway |
 | `OPENCLAW_GATEWAY_TOKEN` | `--token` flag | Mapped from `MOLTBOT_GATEWAY_TOKEN` |
 | `OPENCLAW_DEV_MODE` | `controlUi.allowInsecureAuth` | Mapped from `DEV_MODE` |
+| `OPENROUTER_API_KEY` | (env var) | OpenAI-compatible, used as OpenAI provider |
 | `TELEGRAM_BOT_TOKEN` | `channels.telegram.botToken` | |
+| `TELEGRAM_DM_ALLOW_FROM` | `channels.telegram.allowFrom` | Comma-separated user IDs |
 | `DISCORD_BOT_TOKEN` | `channels.discord.token` | |
 | `SLACK_BOT_TOKEN` | `channels.slack.botToken` | |
 | `SLACK_APP_TOKEN` | `channels.slack.appToken` | |
+| `GOG_KEYRING_PASSWORD` | (env var) | Also sets `GOG_KEYRING_BACKEND=file` |
+| `GOG_OAUTH_CREDENTIALS` | (env var) | OAuth client JSON for automated setup |
 
 ## OpenClaw Config Schema
 
@@ -216,7 +222,7 @@ OpenClaw has strict config validation. Common gotchas:
 - No `webchat` channel - the Control UI is served automatically
 - `gateway.bind` is not a config option - use `--bind` CLI flag
 
-See [OpenClaw docs](https://docs.openclaw.ai/) for full schema.
+See the [OpenClaw documentation](https://docs.openclaw.ai/) for full config schema and CLI reference.
 
 ## Common Tasks
 

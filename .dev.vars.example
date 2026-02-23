@@ -3,7 +3,9 @@
 
 # AI Provider (at least one required)
 ANTHROPIC_API_KEY=sk-ant-...
+# ANTHROPIC_BASE_URL=https://custom-endpoint.example.com
 # OPENAI_API_KEY=sk-...
+# OPENROUTER_API_KEY=sk-or-...
 
 # Cloudflare AI Gateway (alternative to direct provider keys)
 # CLOUDFLARE_AI_GATEWAY_API_KEY=your-provider-api-key
@@ -35,8 +37,19 @@ MOLTBOT_GATEWAY_TOKEN=dev-token-change-in-prod
 
 # Optional chat channels
 # TELEGRAM_BOT_TOKEN=optional
+# TELEGRAM_DM_POLICY=pairing
+# TELEGRAM_DM_ALLOW_FROM=123456789,987654321
 # DISCORD_BOT_TOKEN=optional
+# SLACK_BOT_TOKEN=optional
+# SLACK_APP_TOKEN=optional
+
+# R2 bucket name override (default: moltbot-data)
+# R2_BUCKET_NAME=moltbot-data
 
 # CDP (Chrome DevTools Protocol) configuration for browser automation
 # CDP_SECRET=shared-secret-for-cdp-auth
 # WORKER_URL=https://your-worker.example.com
+
+# gogcli (Google Suite CLI) for Gmail, Calendar, Drive, Tasks access
+# GOG_KEYRING_PASSWORD=your-keyring-password
+# GOG_OAUTH_CREDENTIALS={"installed":{"client_id":"..."}}
