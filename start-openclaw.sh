@@ -136,9 +136,17 @@ if r2_configured; then
     REMOTE_GOG_COUNT=$(rclone ls "r2:${R2_BUCKET}/gogcli/" $RCLONE_FLAGS 2>/dev/null | wc -l)
     if [ "$REMOTE_GOG_COUNT" -gt 0 ]; then
         echo "Restoring gogcli config from R2 ($REMOTE_GOG_COUNT files)..."
-        mkdir -p "$GOG_CONFIG_DIR"
+        mkdir -p "$GOG_CONFIG_DIR/keyring"
         rclone copy "r2:${R2_BUCKET}/gogcli/" "$GOG_CONFIG_DIR/" $RCLONE_FLAGS -v 2>&1 || echo "WARNING: gogcli config restore failed with exit code $?"
-        echo "gogcli config restored"
+        chmod -R 700 "$GOG_CONFIG_DIR"
+        echo "gogcli config restored. Files:"
+        ls -laR "$GOG_CONFIG_DIR/" 2>&1
+        if [ -n "$GOG_KEYRING_PASSWORD" ] && command -v gog &>/dev/null; then
+            echo "Verifying gogcli auth..."
+            GOG_KEYRING_BACKEND=file GOG_KEYRING_PASSWORD="$GOG_KEYRING_PASSWORD" gog auth list 2>&1 || echo "WARNING: gogcli auth verification failed"
+        fi
+    else
+        echo "No gogcli config found in R2"
     fi
 else
     echo "R2 not configured, starting fresh"
@@ -440,12 +448,17 @@ if (process.env.GOG_KEYRING_PASSWORD) {
     mainAgent.mcp.servers = mainAgent.mcp.servers || [];
     const hasGogcli = mainAgent.mcp.servers.some(s => s.name === 'google');
     if (!hasGogcli) {
+        const mcpEnv = {
+            GOG_KEYRING_BACKEND: 'file',
+            GOG_KEYRING_PASSWORD: process.env.GOG_KEYRING_PASSWORD,
+        };
         mainAgent.mcp.servers.push({
             name: 'google',
             command: 'node',
             args: ['/usr/local/lib/gogcli-mcp/dist/server.js'],
+            env: mcpEnv,
         });
-        console.log('Added gogcli MCP server to agent config');
+        console.log('Added gogcli MCP server to agent config with env:', Object.keys(mcpEnv));
     }
 }
 

@@ -17,7 +17,11 @@ export function execGog(args: string[]): Promise<GogResult> {
     execFile(
       GOG_BINARY,
       ['--json', '--no-input', ...args],
-      { timeout: GOG_TIMEOUT_MS, maxBuffer: 10 * 1024 * 1024 },
+      {
+        timeout: GOG_TIMEOUT_MS,
+        maxBuffer: 10 * 1024 * 1024,
+        env: { ...process.env, GOG_KEYRING_BACKEND: 'file' },
+      },
       (error, stdout, stderr) => {
         resolve({
           stdout: stdout ?? '',
