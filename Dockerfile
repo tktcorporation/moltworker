@@ -25,6 +25,21 @@ RUN npm install -g pnpm
 RUN npm install -g openclaw@2026.2.3 \
     && openclaw --version
 
+# Install gogcli (Google Suite CLI for Tasks, Calendar, etc.)
+# start-openclaw.sh でも fallback インストールするが、ビルド時に入れておくことで
+# 起動時の GitHub ダウンロード失敗リスクを排除し、起動を高速化する
+# リリースアセットは gogcli_<ver>_linux_<arch>.tar.gz 形式（tarball、バイナリ名は gog）
+# /latest/download/ はバージョン番号入りファイル名に対応しないため、
+# GitHub API でタグを取得してダウンロード URL を組み立てる
+RUN ARCH="$(dpkg --print-architecture)" \
+    && GOG_VERSION="$(curl -fsSL https://api.github.com/repos/steipete/gogcli/releases/latest | grep '"tag_name"' | sed 's/.*"v\(.*\)".*/\1/')" \
+    && curl -fsSL "https://github.com/steipete/gogcli/releases/download/v${GOG_VERSION}/gogcli_${GOG_VERSION}_linux_${ARCH}.tar.gz" \
+       -o /tmp/gogcli.tar.gz \
+    && tar -xzf /tmp/gogcli.tar.gz -C /usr/local/bin/ gog \
+    && chmod +x /usr/local/bin/gog \
+    && rm /tmp/gogcli.tar.gz \
+    && gog --version
+
 # Create OpenClaw directories
 # Legacy .clawdbot paths are kept for R2 backup migration
 RUN mkdir -p /root/.openclaw \
@@ -32,7 +47,7 @@ RUN mkdir -p /root/.openclaw \
     && mkdir -p /root/clawd/skills
 
 # Copy startup script
-# Build cache bust: 2026-02-11-v30-rclone
+# Build cache bust: 2026-02-23-v31-gogcli-fix
 COPY start-openclaw.sh /usr/local/bin/start-openclaw.sh
 RUN chmod +x /usr/local/bin/start-openclaw.sh
 

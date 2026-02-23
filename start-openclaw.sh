@@ -56,11 +56,23 @@ install_gogcli() {
     local OS
     OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 
-    local DOWNLOAD_URL="https://github.com/steipete/gogcli/releases/latest/download/gog_${OS}_${ARCH}"
-    echo "Downloading gogcli from: $DOWNLOAD_URL"
+    # リリースアセットは gogcli_<ver>_<os>_<arch>.tar.gz 形式（tarball、バイナリ名は gog）
+    # GitHub API でバージョンを取得し、正しい URL を組み立てる
+    local GOG_VERSION
+    GOG_VERSION=$(curl -fsSL https://api.github.com/repos/steipete/gogcli/releases/latest | grep '"tag_name"' | sed 's/.*"v\(.*\)".*/\1/')
 
-    if curl -fsSL "$DOWNLOAD_URL" -o /usr/local/bin/gog; then
+    if [ -z "$GOG_VERSION" ]; then
+        echo "WARNING: Failed to fetch gogcli version from GitHub API"
+        return
+    fi
+
+    local DOWNLOAD_URL="https://github.com/steipete/gogcli/releases/download/v${GOG_VERSION}/gogcli_${GOG_VERSION}_${OS}_${ARCH}.tar.gz"
+    echo "Downloading gogcli v${GOG_VERSION} from: $DOWNLOAD_URL"
+
+    if curl -fsSL "$DOWNLOAD_URL" -o /tmp/gogcli.tar.gz; then
+        tar -xzf /tmp/gogcli.tar.gz -C /usr/local/bin/ gog
         chmod +x /usr/local/bin/gog
+        rm -f /tmp/gogcli.tar.gz
         echo "gogcli installed: $(gog --version 2>/dev/null || echo 'installed')"
     else
         echo "WARNING: Failed to download gogcli, Google services will not be available"
