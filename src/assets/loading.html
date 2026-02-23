@@ -129,6 +129,27 @@
         display: none;
       }
 
+      .error-details {
+        margin-top: 12px;
+        padding: 12px;
+        background: rgba(0, 0, 0, 0.3);
+        border-radius: 6px;
+        font-family: 'Menlo', 'Consolas', monospace;
+        font-size: 0.75rem;
+        color: #d4d4d4;
+        text-align: left;
+        white-space: pre-wrap;
+        word-break: break-all;
+        max-height: 200px;
+        overflow-y: auto;
+      }
+
+      .error-hint {
+        margin-top: 12px;
+        font-size: 0.8rem;
+        color: #a0a0a0;
+      }
+
       .ready {
         color: #4ade80;
       }
@@ -158,6 +179,52 @@
       let consecutiveErrors = 0;
       const maxConsecutiveErrors = 5;
 
+      /**
+       * startup_failed 時にエラー詳細を表示してポーリングを停止する。
+       * circuit breaker が検知した起動失敗の原因をユーザーに見せることで、
+       * "waiting for gateway" が永遠に表示される問題を解消する。
+       * DOM 操作は textContent を使い、XSS を防ぐ。
+       */
+      function showStartupFailure(errorData) {
+        titleEl.textContent = 'Gateway startup failed';
+        titleEl.style.color = '#f87171';
+        document.querySelector('.spinner').style.display = 'none';
+        statusEl.textContent = '';
+
+        var message = errorData.message || 'Unknown startup error';
+        var stderr = errorData.stderr || '';
+
+        // DOM を安全に構築（textContent のみ使用）
+        errorEl.textContent = '';
+
+        var strong = document.createElement('strong');
+        strong.textContent = 'Startup Error';
+        errorEl.appendChild(strong);
+
+        errorEl.appendChild(document.createElement('br'));
+
+        var msgSpan = document.createElement('span');
+        msgSpan.textContent = message;
+        errorEl.appendChild(msgSpan);
+
+        if (stderr) {
+          var details = document.createElement('div');
+          details.className = 'error-details';
+          details.textContent = stderr;
+          errorEl.appendChild(details);
+        }
+
+        var hint = document.createElement('p');
+        hint.className = 'error-hint';
+        hint.textContent =
+          'This usually means the gateway config (openclaw.json) contains invalid keys. ' +
+          'Try redeploying or checking the R2 backup.';
+        errorEl.appendChild(hint);
+
+        errorEl.style.display = 'block';
+        // ポーリング停止 — startup_failed は再起動しない限り回復しないため
+      }
+
       async function checkStatus() {
         pollCount++;
 
@@ -168,7 +235,11 @@
 
           if (data.ok && data.status === 'running') {
             // Container is ready! Reload the page
-            titleEl.innerHTML = '<span class="ready">Moltworker is ready!</span>';
+            var readySpan = document.createElement('span');
+            readySpan.className = 'ready';
+            readySpan.textContent = 'Moltworker is ready!';
+            titleEl.textContent = '';
+            titleEl.appendChild(readySpan);
             statusEl.textContent = 'Redirecting...';
             document.querySelector('.spinner').style.display = 'none';
 
@@ -179,17 +250,29 @@
             return;
           }
 
-          // Update status message based on state
+          // startup_failed: circuit breaker が起動失敗を検知した場合
+          if (data.status === 'startup_failed') {
+            showStartupFailure(data.error || {});
+            return; // ポーリング停止
+          }
+
+          // Update status message based on state and choose poll interval.
+          // Use longer intervals during startup to avoid overwhelming the
+          // Durable Object while it resets after a deploy (which can cause
+          // a "reset loop" if requests arrive faster than the reset completes).
+          let nextPollMs = 5000;
           if (data.status === 'not_running') {
             statusEl.textContent = 'Container is starting up...';
+            nextPollMs = 8000; // startup takes time, no rush
           } else if (data.status === 'not_responding') {
             statusEl.textContent = 'Container started, waiting for gateway...';
+            nextPollMs = 5000;
           } else {
             statusEl.textContent = 'Checking status... (poll #' + pollCount + ')';
           }
 
           // Continue polling
-          setTimeout(checkStatus, 2000);
+          setTimeout(checkStatus, nextPollMs);
         } catch (err) {
           consecutiveErrors++;
 
@@ -205,7 +288,9 @@
         }
       }
 
-      // Start polling after a brief delay
+      // Start polling after a brief delay.
+      // 初回は 1 秒後に開始 — ページロード直後はまだ sandbox が起動していない可能性が高いため、
+      // 即座にリクエストしても not_running が返るだけ。
       setTimeout(checkStatus, 1000);
     </script>
   </body>

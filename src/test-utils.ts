@@ -57,6 +57,7 @@ export interface MockSandbox {
   containerFetchMock: ReturnType<typeof vi.fn>;
   execMock: ReturnType<typeof vi.fn>;
   writeFileMock: ReturnType<typeof vi.fn>;
+  readFileMock: ReturnType<typeof vi.fn>;
 }
 
 export function createMockSandbox(
@@ -69,6 +70,9 @@ export function createMockSandbox(
   const startProcessMock = vi.fn().mockResolvedValue(createMockProcess());
   const execMock = vi.fn().mockResolvedValue(createMockExecResult());
   const writeFileMock = vi.fn().mockResolvedValue(undefined);
+  const readFileMock = vi
+    .fn()
+    .mockResolvedValue({ success: false, path: '', content: '' });
 
   const sandbox = {
     listProcesses: listProcessesMock,
@@ -76,6 +80,7 @@ export function createMockSandbox(
     containerFetch: containerFetchMock,
     exec: execMock,
     writeFile: writeFileMock,
+    readFile: readFileMock,
     wsConnect: vi.fn(),
   } as unknown as Sandbox;
 
@@ -86,6 +91,7 @@ export function createMockSandbox(
     containerFetchMock,
     execMock,
     writeFileMock,
+    readFileMock,
   };
 }
 
