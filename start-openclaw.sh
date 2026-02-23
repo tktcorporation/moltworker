@@ -671,10 +671,15 @@ trap cleanup SIGTERM SIGINT
 RESTART_DELAY=5
 
 # Circuit breaker の設定
-# WINDOW 秒以内に MAX_CRASHES 回クラッシュ → config エラーと判断
+# 2つのモード:
+#   1. Quick crash: WINDOW 秒以内に MAX_CRASHES 回 → config エラーと判断して停止
+#   2. Total crash: 起動後の累計クラッシュ回数が上限に達したら停止
+#      (30 秒以上生きてからクラッシュするケースでも無限ループを防ぐ)
 CIRCUIT_BREAKER_MAX_CRASHES=3
 CIRCUIT_BREAKER_WINDOW=30
+CIRCUIT_BREAKER_MAX_TOTAL=10
 CRASH_COUNT=0
+TOTAL_CRASH_COUNT=0
 FIRST_CRASH_TIME=0
 STDERR_LOG="/tmp/gateway-stderr.log"
 
@@ -693,9 +698,23 @@ while $WATCHDOG_RUNNING; do
         break
     fi
 
-    echo "[watchdog] Gateway exited (code=$EXIT_CODE, uptime=${GW_UPTIME}s), restarting in ${RESTART_DELAY}s..."
+    TOTAL_CRASH_COUNT=$((TOTAL_CRASH_COUNT + 1))
+    echo "[watchdog] Gateway exited (code=$EXIT_CODE, uptime=${GW_UPTIME}s, total crashes=$TOTAL_CRASH_COUNT), restarting in ${RESTART_DELAY}s..."
 
-    # Circuit breaker: 長時間稼働後のクラッシュはカウンターをリセット
+    # Total circuit breaker: 長時間稼働後のクラッシュでも累計上限で停止する。
+    # 30 秒超の uptime は quick crash カウンターをリセットするが、
+    # 「40 秒動いて死ぬ→リスタート→40 秒動いて死ぬ」の無限ループを防ぐ。
+    if [ "$TOTAL_CRASH_COUNT" -ge "$CIRCUIT_BREAKER_MAX_TOTAL" ]; then
+        echo "[watchdog] TOTAL CIRCUIT BREAKER: Gateway crashed $TOTAL_CRASH_COUNT times total"
+        LAST_STDERR=$(tail -50 "$STDERR_LOG" 2>/dev/null || echo "(no stderr captured)")
+        ESCAPED_STDERR=$(echo "$LAST_STDERR" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))' 2>/dev/null || echo '"(stderr unavailable)"')
+        cat > /tmp/gateway-startup-error << EOFERR
+{"error":"total_circuit_breaker","message":"Gateway crashed $TOTAL_CRASH_COUNT times total (limit: $CIRCUIT_BREAKER_MAX_TOTAL). Stopping watchdog.","exitCode":$EXIT_CODE,"totalCrashes":$TOTAL_CRASH_COUNT,"stderr":$ESCAPED_STDERR,"timestamp":"$(date -Iseconds)"}
+EOFERR
+        break
+    fi
+
+    # Quick circuit breaker: 長時間稼働後のクラッシュはカウンターをリセット
     # （OOM 等の一時的な問題であり、config エラーではない）
     if [ "$GW_UPTIME" -ge "$CIRCUIT_BREAKER_WINDOW" ]; then
         CRASH_COUNT=0
