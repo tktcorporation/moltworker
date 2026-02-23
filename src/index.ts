@@ -478,18 +478,39 @@ export default {
   /**
    * 5分ごとの死活監視 cron handler。
    *
-   * ensureMoltbotGateway() がプロセスの存在確認 → port 待機 → タイムアウトなら
-   * kill & 再起動を行うため、ここでは追加の health check は行わない。
-   * start-openclaw.sh 内の watchdog がクラッシュ時の自動再起動を担当する。
+   * ensureMoltbotGateway() はプロセス存在 + port 待機だけなので、
+   * 「プロセスは running だが内部的にハングしている」状態を検知できない。
+   * 実際に HTTP リクエストを送り、応答がなければプロセスを kill する。
+   * kill 後は container 内の watchdog が自動再起動を行う。
    */
   async scheduled(event: ScheduledEvent, env: MoltbotEnv, _ctx: ExecutionContext) {
     const options = buildSandboxOptions(env);
     const sandbox = getSandbox(env.Sandbox, 'moltbot', options);
     try {
       await ensureMoltbotGateway(sandbox, env);
-      console.log('[CRON] Gateway is running');
+
+      // プロセス存在だけでなく、実際に HTTP 応答するか確認（30秒タイムアウト）。
+      // 短すぎると CPU 負荷時に誤検知 → kill → 再起動ループになるため余裕を持たせる。
+      const healthReq = new Request('http://localhost/');
+      const resp = await Promise.race([
+        sandbox.containerFetch(healthReq, MOLTBOT_PORT),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Health check timeout')), 30_000)),
+      ]);
+      if (!resp.ok) {
+        throw new Error(`Gateway responded with ${resp.status}`);
+      }
+      console.log('[CRON] Gateway is healthy');
     } catch (error) {
-      console.error('[CRON] Failed to ensure gateway:', error);
+      console.error('[CRON] Health check failed, killing gateway:', error);
+      try {
+        const proc = await findExistingMoltbotProcess(sandbox);
+        if (proc) {
+          await proc.kill();
+          console.log('[CRON] Killed unhealthy gateway process, watchdog will restart');
+        }
+      } catch (killError) {
+        console.error('[CRON] Failed to kill process:', killError);
+      }
     }
   },
 };
