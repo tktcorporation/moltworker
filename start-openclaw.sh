@@ -516,9 +516,13 @@ if r2_configured; then
 fi
 
 # ============================================================
-# START GATEWAY
+# START GATEWAY (with watchdog)
 # ============================================================
-echo "Starting OpenClaw Gateway..."
+# ウォッチドッグループで gateway を起動し、クラッシュ時に自動再起動する。
+# 以前は exec で直接起動していたため、gateway が OOM やクラッシュで死ぬと
+# 次のリクエストが来るまで（最大1時間）復旧しなかった。
+# SIGTERM を受けたらクリーンに終了し、無限再起動を防ぐ。
+echo "Starting OpenClaw Gateway (with watchdog)..."
 echo "Gateway will be available on port 18789"
 
 rm -f /tmp/openclaw-gateway.lock 2>/dev/null || true
@@ -526,10 +530,48 @@ rm -f "$CONFIG_DIR/gateway.lock" 2>/dev/null || true
 
 echo "Dev mode: ${OPENCLAW_DEV_MODE:-false}"
 
+GATEWAY_CMD="openclaw gateway --port 18789 --verbose --allow-unconfigured --bind lan"
 if [ -n "$OPENCLAW_GATEWAY_TOKEN" ]; then
-    echo "Starting gateway with token auth..."
-    exec openclaw gateway --port 18789 --verbose --allow-unconfigured --bind lan --token "$OPENCLAW_GATEWAY_TOKEN"
+    GATEWAY_CMD="$GATEWAY_CMD --token $OPENCLAW_GATEWAY_TOKEN"
+    echo "Gateway auth: token"
 else
-    echo "Starting gateway with device pairing (no token)..."
-    exec openclaw gateway --port 18789 --verbose --allow-unconfigured --bind lan
+    echo "Gateway auth: device pairing (no token)"
 fi
+
+# SIGTERM/SIGINT → ウォッチドッグを停止してクリーンに終了
+# Container shutdown 時に無限再起動ループに入らないようにするため
+WATCHDOG_RUNNING=true
+cleanup() {
+    echo "[watchdog] Received shutdown signal, stopping..."
+    WATCHDOG_RUNNING=false
+    # gateway プロセスがまだ動いていれば SIGTERM を転送
+    if [ -n "$GW_PID" ] && kill -0 "$GW_PID" 2>/dev/null; then
+        kill "$GW_PID" 2>/dev/null
+        wait "$GW_PID" 2>/dev/null
+    fi
+    exit 0
+}
+trap cleanup SIGTERM SIGINT
+
+RESTART_DELAY=5
+
+while $WATCHDOG_RUNNING; do
+    echo "[watchdog] Starting gateway..."
+    $GATEWAY_CMD &
+    GW_PID=$!
+    wait "$GW_PID"
+    EXIT_CODE=$?
+
+    if ! $WATCHDOG_RUNNING; then
+        echo "[watchdog] Shutdown requested, not restarting"
+        break
+    fi
+
+    echo "[watchdog] Gateway exited (code=$EXIT_CODE), restarting in ${RESTART_DELAY}s..."
+
+    # ロックファイルが残るとプロセス再起動に失敗するため掃除
+    rm -f /tmp/openclaw-gateway.lock 2>/dev/null || true
+    rm -f "$CONFIG_DIR/gateway.lock" 2>/dev/null || true
+
+    sleep "$RESTART_DELAY"
+done

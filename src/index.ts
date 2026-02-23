@@ -475,14 +475,32 @@ app.all('*', async (c) => {
 
 export default {
   fetch: app.fetch,
-  async scheduled(event: ScheduledEvent, env: MoltbotEnv, ctx: ExecutionContext) {
+  /**
+   * 5分ごとの死活監視 cron handler。
+   *
+   * ensureMoltbotGateway() だけだと「プロセスが存在するが応答不能（ハング状態）」を
+   * 検知できないため、実際に HTTP リクエストを送って応答を確認する。
+   * 応答がなければプロセスを kill し、次の ensureMoltbotGateway() で再起動させる。
+   */
+  async scheduled(event: ScheduledEvent, env: MoltbotEnv, _ctx: ExecutionContext) {
     const options = buildSandboxOptions(env);
     const sandbox = getSandbox(env.Sandbox, 'moltbot', options);
     try {
       await ensureMoltbotGateway(sandbox, env);
-      console.log('[CRON] Gateway is running');
+
+      // プロセス起動だけでなく、実際に HTTP 応答するか確認
+      const healthReq = new Request('http://localhost/');
+      const resp = await sandbox.containerFetch(healthReq, MOLTBOT_PORT);
+      if (!resp.ok) {
+        console.warn(`[CRON] Gateway responded with ${resp.status}, killing to trigger restart`);
+        const proc = await findExistingMoltbotProcess(sandbox);
+        if (proc) await proc.kill();
+        // ウォッチドッグが container 内で自動再起動するので、ここでは再起動しない
+        return;
+      }
+      console.log('[CRON] Gateway is healthy');
     } catch (error) {
-      console.error('[CRON] Failed to ensure gateway:', error);
+      console.error('[CRON] Health check failed:', error);
     }
   },
 };

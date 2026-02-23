@@ -67,9 +67,11 @@
   "browser": {
     "binding": "BROWSER",
   },
-  // Cron trigger to keep the gateway alive and Discord bot connected
+  // Cron trigger: 5分ごとに gateway の死活監視を行い、停止していれば再起動する。
+  // 以前は毎時 (0 * * * *) だったが、container eviction 後の復旧に最大59分かかっていた。
+  // 5分間隔にすることで、Discord/Telegram ボットの切断時間を大幅に短縮する。
   "triggers": {
-    "crons": ["0 * * * *"],
+    "crons": ["*/5 * * * *"],
   },
   // Note: CF_ACCOUNT_ID should be set via `wrangler secret put CF_ACCOUNT_ID`
   // Secrets to configure via `wrangler secret put`:
