@@ -439,32 +439,38 @@ if (process.env.SLACK_BOT_TOKEN && process.env.SLACK_APP_TOKEN) {
     };
 }
 
-// gogcli MCP server configuration
-if (process.env.GOG_KEYRING_PASSWORD) {
-    config.agents = config.agents || {};
-    config.agents.list = config.agents.list || [{ id: 'main' }];
-    const mainAgent = config.agents.list.find(a => a.id === 'main') || config.agents.list[0];
-    mainAgent.mcp = mainAgent.mcp || {};
-    mainAgent.mcp.servers = mainAgent.mcp.servers || [];
-    const hasGogcli = mainAgent.mcp.servers.some(s => s.name === 'google');
-    if (!hasGogcli) {
-        const mcpEnv = {
-            GOG_KEYRING_BACKEND: 'file',
-            GOG_KEYRING_PASSWORD: process.env.GOG_KEYRING_PASSWORD,
-        };
-        mainAgent.mcp.servers.push({
-            name: 'google',
-            command: 'node',
-            args: ['/usr/local/lib/gogcli-mcp/dist/server.js'],
-            env: mcpEnv,
-        });
-        console.log('Added gogcli MCP server to agent config with env:', Object.keys(mcpEnv));
+// Clean up unsupported keys that may exist in configs restored from R2.
+// OpenClaw v2026.2.3 strictly validates the config and rejects unknown keys,
+// preventing gateway startup entirely. gogcli-mcp server code was removed but
+// old R2 snapshots may still contain "mcp" keys in agent config.
+if (config.agents && Array.isArray(config.agents.list)) {
+    for (const agent of config.agents.list) {
+        if (agent.mcp) {
+            console.log('Removing unsupported "mcp" key from agent: ' + (agent.name || 'unknown'));
+            delete agent.mcp;
+        }
     }
 }
 
 fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
 console.log('Configuration patched successfully');
 EOFPATCH
+
+# ── Config validation ──────────────────────────────────────
+# パッチ後の JSON が壊れていないか検証する。
+# R2 から復元された config に不正なキーが残っていた場合、
+# OpenClaw がバリデーションエラーで即座にクラッシュし、watchdog が
+# 無限ループする障害が 2026-02 に発生した。ここで早期に検知することで
+# ゲートウェイ起動前に問題を報告できる。
+echo "Validating patched config..."
+if ! node -e "JSON.parse(require('fs').readFileSync('$CONFIG_FILE','utf8'))"; then
+    echo "FATAL: Patched config is not valid JSON"
+    cat > /tmp/gateway-startup-error << EOFERR
+{"error":"config_invalid_json","message":"Patched openclaw.json is not valid JSON. The config file may have been corrupted during patching.","timestamp":"$(date -Iseconds)"}
+EOFERR
+    exit 1
+fi
+echo "Config validation passed"
 
 # ============================================================
 # GOGCLI AUTH SETUP (if credentials provided via env)
@@ -529,17 +535,27 @@ if r2_configured; then
 fi
 
 # ============================================================
-# START GATEWAY (with watchdog)
+# START GATEWAY (with watchdog + circuit breaker)
 # ============================================================
 # ウォッチドッグループで gateway を起動し、クラッシュ時に自動再起動する。
 # 以前は exec で直接起動していたため、gateway が OOM やクラッシュで死ぬと
 # 次のリクエストが来るまで（最大1時間）復旧しなかった。
 # SIGTERM を受けたらクリーンに終了し、無限再起動を防ぐ。
+#
+# Circuit breaker (2026-02 障害対応):
+# R2 から復元された config に OpenClaw が認識しないキーが含まれると、
+# ゲートウェイが即座にクラッシュ → watchdog が再起動 → 再クラッシュ の
+# 無限ループに陥る。Worker 側は 180秒タイムアウトを繰り返し、ユーザーには
+# "waiting for gateway" が永遠に表示された。
+# 対策: CIRCUIT_BREAKER_WINDOW 秒以内に CIRCUIT_BREAKER_MAX_CRASHES 回
+# クラッシュしたら config エラーと判断し、エラー情報を JSON ファイルに
+# 書き出してループを停止する。
 echo "Starting OpenClaw Gateway (with watchdog)..."
 echo "Gateway will be available on port 18789"
 
 rm -f /tmp/openclaw-gateway.lock 2>/dev/null || true
 rm -f "$CONFIG_DIR/gateway.lock" 2>/dev/null || true
+rm -f /tmp/gateway-startup-error 2>/dev/null || true
 
 echo "Dev mode: ${OPENCLAW_DEV_MODE:-false}"
 
@@ -568,19 +584,71 @@ trap cleanup SIGTERM SIGINT
 
 RESTART_DELAY=5
 
+# Circuit breaker の設定
+# WINDOW 秒以内に MAX_CRASHES 回クラッシュ → config エラーと判断
+CIRCUIT_BREAKER_MAX_CRASHES=3
+CIRCUIT_BREAKER_WINDOW=30
+CRASH_COUNT=0
+FIRST_CRASH_TIME=0
+STDERR_LOG="/tmp/gateway-stderr.log"
+
 while $WATCHDOG_RUNNING; do
     echo "[watchdog] Starting gateway..."
-    $GATEWAY_CMD &
+    $GATEWAY_CMD 2>> "$STDERR_LOG" &
     GW_PID=$!
+    GW_START_TIME=$(date +%s)
     wait "$GW_PID"
     EXIT_CODE=$?
+    GW_END_TIME=$(date +%s)
+    GW_UPTIME=$((GW_END_TIME - GW_START_TIME))
 
     if ! $WATCHDOG_RUNNING; then
         echo "[watchdog] Shutdown requested, not restarting"
         break
     fi
 
-    echo "[watchdog] Gateway exited (code=$EXIT_CODE), restarting in ${RESTART_DELAY}s..."
+    echo "[watchdog] Gateway exited (code=$EXIT_CODE, uptime=${GW_UPTIME}s), restarting in ${RESTART_DELAY}s..."
+
+    # Circuit breaker: 長時間稼働後のクラッシュはカウンターをリセット
+    # （OOM 等の一時的な問題であり、config エラーではない）
+    if [ "$GW_UPTIME" -ge "$CIRCUIT_BREAKER_WINDOW" ]; then
+        CRASH_COUNT=0
+        FIRST_CRASH_TIME=0
+    else
+        # 短時間クラッシュ → カウンターを加算
+        NOW=$(date +%s)
+        if [ "$CRASH_COUNT" -eq 0 ]; then
+            FIRST_CRASH_TIME=$NOW
+        fi
+
+        # ウィンドウを超えた古いクラッシュはリセット
+        ELAPSED=$((NOW - FIRST_CRASH_TIME))
+        if [ "$ELAPSED" -ge "$CIRCUIT_BREAKER_WINDOW" ]; then
+            CRASH_COUNT=1
+            FIRST_CRASH_TIME=$NOW
+        else
+            CRASH_COUNT=$((CRASH_COUNT + 1))
+        fi
+
+        echo "[watchdog] Quick crash detected (${GW_UPTIME}s uptime, crash $CRASH_COUNT/$CIRCUIT_BREAKER_MAX_CRASHES in ${ELAPSED:-0}s window)"
+
+        if [ "$CRASH_COUNT" -ge "$CIRCUIT_BREAKER_MAX_CRASHES" ]; then
+            echo "[watchdog] CIRCUIT BREAKER OPEN: Gateway crashed $CRASH_COUNT times within ${CIRCUIT_BREAKER_WINDOW}s"
+            echo "[watchdog] This likely indicates a configuration error. Check stderr log: $STDERR_LOG"
+
+            # 最新の stderr を取得してエラーファイルに書き出し
+            LAST_STDERR=$(tail -50 "$STDERR_LOG" 2>/dev/null || echo "(no stderr captured)")
+            # JSON エスケープ（改行・引用符）
+            ESCAPED_STDERR=$(echo "$LAST_STDERR" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))' 2>/dev/null || echo '"(stderr unavailable)"')
+
+            cat > /tmp/gateway-startup-error << EOFERR
+{"error":"circuit_breaker_open","message":"Gateway crashed $CRASH_COUNT times within ${CIRCUIT_BREAKER_WINDOW}s. Likely a configuration error.","exitCode":$EXIT_CODE,"crashCount":$CRASH_COUNT,"stderr":$ESCAPED_STDERR,"timestamp":"$(date -Iseconds)"}
+EOFERR
+            echo "[watchdog] Error details written to /tmp/gateway-startup-error"
+            # ループを停止（Worker 側が /tmp/gateway-startup-error を読んでユーザーに表示する）
+            break
+        fi
+    fi
 
     # ロックファイルが残るとプロセス再起動に失敗するため掃除
     rm -f /tmp/openclaw-gateway.lock 2>/dev/null || true
