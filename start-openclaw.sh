@@ -148,10 +148,10 @@ if r2_configured; then
     # ただし config.json（OAuth client 設定）は常に restore する。
     if [ -n "$GOG_AUTH_TOKENS" ]; then
         echo "GOG_AUTH_TOKENS is set, skipping R2 keyring restore (will import fresh tokens later)"
-        # OAuth client config のみ restore（keyring は除外）
-        if rclone ls "r2:${R2_BUCKET}/gogcli/config.json" $RCLONE_FLAGS 2>/dev/null | grep -q config.json; then
+        # OAuth client credentials のみ restore（keyring は除外）
+        if rclone ls "r2:${R2_BUCKET}/gogcli/credentials.json" $RCLONE_FLAGS 2>/dev/null | grep -q credentials.json; then
             mkdir -p "$GOG_CONFIG_DIR"
-            rclone copy "r2:${R2_BUCKET}/gogcli/config.json" "$GOG_CONFIG_DIR/" $RCLONE_FLAGS -v 2>&1 || echo "WARNING: gogcli config.json restore failed"
+            rclone copy "r2:${R2_BUCKET}/gogcli/credentials.json" "$GOG_CONFIG_DIR/" $RCLONE_FLAGS -v 2>&1 || echo "WARNING: gogcli credentials.json restore failed"
         fi
     else
         REMOTE_GOG_COUNT=$(rclone ls "r2:${R2_BUCKET}/gogcli/" $RCLONE_FLAGS 2>/dev/null | wc -l)
@@ -518,14 +518,19 @@ echo "Config validation passed"
 # Google Tasks の読み書きには `tasks` スコープが必要 (`tasks.readonly` では書き込み不可)。
 # `gog auth add email --services tasks --force-consent` で full access を取得すること。
 
-# Step 1: OAuth client credentials (初回のみ)
-if [ -n "$GOG_OAUTH_CREDENTIALS" ] && [ ! -f "$GOG_CONFIG_DIR/config.json" ]; then
+# Step 1: OAuth client credentials
+# credentials.json がなければ毎回セットアップする（コンテナ再作成時に消えるため）
+# `gog auth credentials set` で $GOG_CONFIG_DIR/credentials.json に保存される
+if [ -n "$GOG_OAUTH_CREDENTIALS" ] && [ ! -f "$GOG_CONFIG_DIR/credentials.json" ]; then
     echo "Setting up gogcli OAuth credentials from env..."
     CREDS_FILE="/tmp/gog-credentials.json"
     echo "$GOG_OAUTH_CREDENTIALS" > "$CREDS_FILE"
-    gog auth credentials "$CREDS_FILE" 2>&1 || echo "WARNING: gogcli credentials setup failed"
+    if gog auth credentials set "$CREDS_FILE" 2>&1; then
+        echo "gogcli credentials configured"
+    else
+        echo "ERROR: gogcli credentials setup failed. Google services will not work."
+    fi
     rm -f "$CREDS_FILE"
-    echo "gogcli credentials configured"
 fi
 
 # Step 2: User tokens import (env var → container file keyring)
