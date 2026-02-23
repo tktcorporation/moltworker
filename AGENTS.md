@@ -98,7 +98,18 @@ When adding new functionality, add corresponding tests.
 - Keep route handlers thin - extract logic to separate modules
 - Use Hono's context methods (`c.json()`, `c.html()`) for responses
 
-## Documentation
+### Documentation — 意図・背景の記載
+
+ファイルやコードブロックを作成・変更する際は、**なぜそれを作成したのか、何のために存在するのか**を必ずコメントやドキュメントに記載する。後から見たときに「これは何のためにあるのか」「削除しても大丈夫か」が判断できるようにする。
+
+- **TypeScript モジュール**: JSDoc やファイル先頭のコメントで、なぜこのモジュールが必要かを説明
+- **シェルスクリプト / Dockerfile**: 各セクションのコメントに「何のための処理か」を書く
+- **設定ファイル**: 非自明な設定値には理由を添える
+- **ワークフロー (`.yml`)**: ファイル冒頭にコメントで目的・背景を記載
+
+単に「何をしているか (what)」ではなく「なぜそうしているか (why)」を書くこと。
+
+## Documentation Files
 
 - `README.md` - User-facing documentation (setup, configuration, usage)
 - `AGENTS.md` - This file, for AI agents
@@ -212,6 +223,7 @@ These are the env vars passed TO the container (internal names):
 | `SLACK_APP_TOKEN` | `channels.slack.appToken` | |
 | `GOG_KEYRING_PASSWORD` | (env var) | Also sets `GOG_KEYRING_BACKEND=file` |
 | `GOG_OAUTH_CREDENTIALS` | (env var) | OAuth client JSON for automated setup |
+| `GOG_AUTH_TOKENS` | (env var) | `gog auth tokens export` の JSON。Mac keychain → container file keyring のインポート用 |
 
 ## OpenClaw Config Schema
 
