@@ -489,12 +489,13 @@ export default {
     try {
       await ensureMoltbotGateway(sandbox, env);
 
-      // プロセス存在だけでなく、実際に HTTP 応答するか確認（30秒タイムアウト）。
-      // 短すぎると CPU 負荷時に誤検知 → kill → 再起動ループになるため余裕を持たせる。
+      // プロセス存在だけでなく、実際に HTTP 応答するか確認（10分タイムアウト）。
+      // 短すぎると CPU 負荷時に誤検知 → kill → 再起動ループになるため、
+      // 本当にハングしている場合だけ kill されるよう十分な余裕を持たせる。
       const healthReq = new Request('http://localhost/');
       const resp = await Promise.race([
         sandbox.containerFetch(healthReq, MOLTBOT_PORT),
-        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Health check timeout')), 30_000)),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Health check timeout')), 600_000)),
       ]);
       if (!resp.ok) {
         throw new Error(`Gateway responded with ${resp.status}`);
