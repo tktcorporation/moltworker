@@ -63,6 +63,7 @@ export function buildEnvVars(env: MoltbotEnv): Record<string, string> {
     envVars.GOG_KEYRING_BACKEND = 'file';
   }
   if (env.GOG_OAUTH_CREDENTIALS) envVars.GOG_OAUTH_CREDENTIALS = env.GOG_OAUTH_CREDENTIALS;
+  if (env.GOG_AUTH_TOKENS) envVars.GOG_AUTH_TOKENS = env.GOG_AUTH_TOKENS;
 
   return envVars;
 }

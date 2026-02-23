@@ -142,8 +142,19 @@ debug.get('/cli', async (c) => {
     }
   }
 
+  // gogcli コマンドには keyring 用の環境変数が必要。
+  // start-openclaw.sh 経由でしか設定されないため、debug CLI から直接実行する場合は
+  // ここで注入する。
+  const processEnv: Record<string, string> = {};
+  if (cmd.startsWith('gog ') && c.env.GOG_KEYRING_PASSWORD) {
+    processEnv.GOG_KEYRING_BACKEND = 'file';
+    processEnv.GOG_KEYRING_PASSWORD = c.env.GOG_KEYRING_PASSWORD;
+  }
+
   try {
-    const proc = await sandbox.startProcess(cmd);
+    const proc = await sandbox.startProcess(cmd, {
+      env: Object.keys(processEnv).length > 0 ? processEnv : undefined,
+    });
     await waitForProcess(proc, 120000);
 
     const logs = await proc.getLogs();

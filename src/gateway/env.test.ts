@@ -177,4 +177,10 @@ describe('buildEnvVars', () => {
     const result = buildEnvVars(env);
     expect(result.GOG_KEYRING_BACKEND).toBe('file');
   });
+
+  it('passes GOG_AUTH_TOKENS to container', () => {
+    const env = createMockEnv({ GOG_AUTH_TOKENS: '{"tokens":[]}' });
+    const result = buildEnvVars(env);
+    expect(result.GOG_AUTH_TOKENS).toBe('{"tokens":[]}');
+  });
 });

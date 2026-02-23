@@ -47,6 +47,7 @@ export interface MoltbotEnv {
   // gogcli (Google Suite CLI) configuration
   GOG_KEYRING_PASSWORD?: string; // Keyring encryption password for gogcli file-based keyring
   GOG_OAUTH_CREDENTIALS?: string; // OAuth client JSON content (optional, for automated setup)
+  GOG_AUTH_TOKENS?: string; // `gog auth tokens export` の JSON。Mac keychain で暗号化されたトークンを container の file keyring にインポートするため
 }
 
 /**

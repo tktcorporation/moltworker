@@ -473,15 +473,53 @@ fi
 echo "Config validation passed"
 
 # ============================================================
-# GOGCLI AUTH SETUP (if credentials provided via env)
+# GOGCLI AUTH SETUP
 # ============================================================
+# gogcli の認証は2段階:
+#   1. OAuth クライアント認証情報 (client_secret.json) → GOG_OAUTH_CREDENTIALS env var
+#   2. ユーザーの認証トークン (refresh token) → GOG_AUTH_TOKENS env var
+#
+# 背景:
+# Mac では `keychain` バックエンド (macOS Keychain) でトークンを暗号化するが、
+# container では `file` バックエンド (GOG_KEYRING_PASSWORD で暗号化) を使う。
+# R2 経由で同期されたトークンファイルは Mac の keychain キーで暗号化されているため
+# container 側では復号できない。この問題を解決するため、Mac で
+# `gog auth tokens export` した平文 JSON を GOG_AUTH_TOKENS env var に設定し、
+# container 起動時に file keyring にインポートする。
+#
+# セットアップ手順 (Mac 側):
+#   gog auth tokens export -o /tmp/gog-tokens.json
+#   cat /tmp/gog-tokens.json | npx wrangler secret put GOG_AUTH_TOKENS
+#   rm /tmp/gog-tokens.json
+#
+# 認証スコープ:
+# Google Tasks の読み書きには `tasks` スコープが必要 (`tasks.readonly` では書き込み不可)。
+# `gog auth add email --services tasks --force-consent` で full access を取得すること。
+
+# Step 1: OAuth client credentials (初回のみ)
 if [ -n "$GOG_OAUTH_CREDENTIALS" ] && [ ! -f "$GOG_CONFIG_DIR/config.json" ]; then
     echo "Setting up gogcli OAuth credentials from env..."
     CREDS_FILE="/tmp/gog-credentials.json"
     echo "$GOG_OAUTH_CREDENTIALS" > "$CREDS_FILE"
     gog auth credentials "$CREDS_FILE" 2>&1 || echo "WARNING: gogcli credentials setup failed"
     rm -f "$CREDS_FILE"
-    echo "gogcli credentials configured (run 'gog auth add email' to complete setup)"
+    echo "gogcli credentials configured"
+fi
+
+# Step 2: User tokens import (Mac keychain → container file keyring)
+# 毎回インポートする（トークンが更新された場合に反映するため）
+if [ -n "$GOG_AUTH_TOKENS" ] && [ -n "$GOG_KEYRING_PASSWORD" ]; then
+    echo "Importing gogcli auth tokens from env..."
+    TOKENS_FILE="/tmp/gog-tokens-import.json"
+    echo "$GOG_AUTH_TOKENS" > "$TOKENS_FILE"
+    GOG_KEYRING_BACKEND=file GOG_KEYRING_PASSWORD="$GOG_KEYRING_PASSWORD" \
+        gog auth tokens import "$TOKENS_FILE" 2>&1 || echo "WARNING: gogcli token import failed"
+    rm -f "$TOKENS_FILE"
+
+    # インポート結果を検証
+    echo "Verifying imported tokens..."
+    GOG_KEYRING_BACKEND=file GOG_KEYRING_PASSWORD="$GOG_KEYRING_PASSWORD" \
+        gog auth list 2>&1 || echo "WARNING: gogcli auth verification failed after import"
 fi
 
 # ============================================================
