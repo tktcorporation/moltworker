@@ -325,13 +325,12 @@ app.all('*', async (c) => {
       console.log('[WS] serverWs.readyState:', serverWs.readyState);
     }
 
-    // Relay messages from client to container, injecting gateway token into connect requests.
-    // The OpenClaw gateway validates the token at the protocol level (in the "connect" message),
-    // not at the WebSocket URL level. The browser-side Control UI normally reads the token from
-    // the page URL (?token=...) and includes it in the connect params, but when proxied through
-    // this Worker the browser URL doesn't contain the token — only the Worker-to-container URL does.
-    // So we inject it here to ensure all clients (mobile, PC, etc.) authenticate correctly.
-    const gatewayToken = c.env.MOLTBOT_GATEWAY_TOKEN;
+    // Relay messages from client to container.
+    // Gateway token auth is handled at the URL level (?token=... injected at line 241-243),
+    // NOT at the RPC protocol level. Newer OpenClaw versions strictly validate connect params
+    // and reject unknown properties like "token", causing:
+    //   disconnected (1008): invalid connect params: at root: unexpected property 'token'
+    // So we strip any "token" property from connect params to prevent this error.
     serverWs.addEventListener('message', (event) => {
       if (debugLogs) {
         console.log(
@@ -343,17 +342,17 @@ app.all('*', async (c) => {
 
       let data = event.data;
 
-      // Inject gateway token into "connect" request params so the gateway accepts the connection.
-      if (gatewayToken && typeof data === 'string') {
+      // Strip "token" from connect params — the browser Control UI may include it
+      // (read from the page URL), but newer OpenClaw gateway rejects unexpected properties.
+      // Auth is already handled via the URL query parameter on the wsConnect request.
+      if (typeof data === 'string') {
         try {
           const parsed = JSON.parse(data);
-          if (parsed.type === 'req' && parsed.method === 'connect' && parsed.params) {
-            if (!parsed.params.token) {
-              parsed.params.token = gatewayToken;
-              data = JSON.stringify(parsed);
-              if (debugLogs) {
-                console.log('[WS] Injected gateway token into connect request');
-              }
+          if (parsed.type === 'req' && parsed.method === 'connect' && parsed.params?.token) {
+            delete parsed.params.token;
+            data = JSON.stringify(parsed);
+            if (debugLogs) {
+              console.log('[WS] Stripped token from connect params (auth via URL)');
             }
           }
         } catch {

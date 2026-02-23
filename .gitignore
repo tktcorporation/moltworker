@@ -61,3 +61,8 @@ test/e2e/.dev.vars
 
 # npm config
 .npmrc
+
+# R2 sync runtime data (managed by start-openclaw.sh R2 sync loop)
+r2-state/openclaw/
+r2-state/skills/
+r2-state/workspace/
