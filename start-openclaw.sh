@@ -28,8 +28,16 @@ mkdir -p "$CONFIG_DIR"
 # ============================================================
 # GOGCLI SETUP
 # ============================================================
+# gogcli の keyring は file backend を使用する。
+# export することで gateway → agent → gog コマンドの全プロセスチェーンで参照可能にする。
+# これがないと OpenClaw agent が skill 経由で gog を呼んだ際に keyring にアクセスできない。
 
 GOG_CONFIG_DIR="/root/.config/gogcli"
+
+if [ -n "$GOG_KEYRING_PASSWORD" ]; then
+    export GOG_KEYRING_BACKEND=file
+    export GOG_KEYRING_PASSWORD
+fi
 
 install_gogcli() {
     if command -v gog &>/dev/null; then
@@ -132,21 +140,35 @@ if r2_configured; then
         echo "Skills restored"
     fi
 
-    # Restore gogcli config (OAuth tokens)
-    REMOTE_GOG_COUNT=$(rclone ls "r2:${R2_BUCKET}/gogcli/" $RCLONE_FLAGS 2>/dev/null | wc -l)
-    if [ "$REMOTE_GOG_COUNT" -gt 0 ]; then
-        echo "Restoring gogcli config from R2 ($REMOTE_GOG_COUNT files)..."
-        mkdir -p "$GOG_CONFIG_DIR/keyring"
-        rclone copy "r2:${R2_BUCKET}/gogcli/" "$GOG_CONFIG_DIR/" $RCLONE_FLAGS -v 2>&1 || echo "WARNING: gogcli config restore failed with exit code $?"
-        chmod -R 700 "$GOG_CONFIG_DIR"
-        echo "gogcli config restored. Files:"
-        ls -laR "$GOG_CONFIG_DIR/" 2>&1
-        if [ -n "$GOG_KEYRING_PASSWORD" ] && command -v gog &>/dev/null; then
-            echo "Verifying gogcli auth..."
-            GOG_KEYRING_BACKEND=file GOG_KEYRING_PASSWORD="$GOG_KEYRING_PASSWORD" gog auth list 2>&1 || echo "WARNING: gogcli auth verification failed"
+    # Restore gogcli config (OAuth client + keyring)
+    # GOG_AUTH_TOKENS が設定されている場合は R2 keyring の restore をスキップする。
+    # 理由: R2 に保存された keyring データは Mac keychain で暗号化されている可能性があり、
+    # container の file backend では復号できない。GOG_AUTH_TOKENS import で正しいデータを
+    # 書き込むため、古いデータの restore は不要（かつ有害）。
+    # ただし config.json（OAuth client 設定）は常に restore する。
+    if [ -n "$GOG_AUTH_TOKENS" ]; then
+        echo "GOG_AUTH_TOKENS is set, skipping R2 keyring restore (will import fresh tokens later)"
+        # OAuth client config のみ restore（keyring は除外）
+        if rclone ls "r2:${R2_BUCKET}/gogcli/config.json" $RCLONE_FLAGS 2>/dev/null | grep -q config.json; then
+            mkdir -p "$GOG_CONFIG_DIR"
+            rclone copy "r2:${R2_BUCKET}/gogcli/config.json" "$GOG_CONFIG_DIR/" $RCLONE_FLAGS -v 2>&1 || echo "WARNING: gogcli config.json restore failed"
         fi
     else
-        echo "No gogcli config found in R2"
+        REMOTE_GOG_COUNT=$(rclone ls "r2:${R2_BUCKET}/gogcli/" $RCLONE_FLAGS 2>/dev/null | wc -l)
+        if [ "$REMOTE_GOG_COUNT" -gt 0 ]; then
+            echo "Restoring gogcli config from R2 ($REMOTE_GOG_COUNT files)..."
+            mkdir -p "$GOG_CONFIG_DIR/keyring"
+            rclone copy "r2:${R2_BUCKET}/gogcli/" "$GOG_CONFIG_DIR/" $RCLONE_FLAGS -v 2>&1 || echo "WARNING: gogcli config restore failed with exit code $?"
+            chmod -R 700 "$GOG_CONFIG_DIR"
+            echo "gogcli config restored. Files:"
+            ls -laR "$GOG_CONFIG_DIR/" 2>&1
+            if [ -n "$GOG_KEYRING_PASSWORD" ] && command -v gog &>/dev/null; then
+                echo "Verifying gogcli auth..."
+                gog auth list 2>&1 || echo "WARNING: gogcli auth verification failed (keyring may be from a different backend)"
+            fi
+        else
+            echo "No gogcli config found in R2"
+        fi
     fi
 else
     echo "R2 not configured, starting fresh"
@@ -506,20 +528,29 @@ if [ -n "$GOG_OAUTH_CREDENTIALS" ] && [ ! -f "$GOG_CONFIG_DIR/config.json" ]; th
     echo "gogcli credentials configured"
 fi
 
-# Step 2: User tokens import (Mac keychain → container file keyring)
-# 毎回インポートする（トークンが更新された場合に反映するため）
+# Step 2: User tokens import (env var → container file keyring)
+# 毎回インポートする（wrangler secret でトークンが更新された場合に反映するため）
+# GOG_KEYRING_BACKEND / GOG_KEYRING_PASSWORD はスクリプト冒頭で export 済み
 if [ -n "$GOG_AUTH_TOKENS" ] && [ -n "$GOG_KEYRING_PASSWORD" ]; then
     echo "Importing gogcli auth tokens from env..."
     TOKENS_FILE="/tmp/gog-tokens-import.json"
     echo "$GOG_AUTH_TOKENS" > "$TOKENS_FILE"
-    GOG_KEYRING_BACKEND=file GOG_KEYRING_PASSWORD="$GOG_KEYRING_PASSWORD" \
-        gog auth tokens import "$TOKENS_FILE" 2>&1 || echo "WARNING: gogcli token import failed"
+
+    if gog auth tokens import "$TOKENS_FILE" 2>&1; then
+        echo "gogcli token import succeeded"
+    else
+        echo "ERROR: gogcli token import failed. Google services will not be available."
+        echo "Re-export tokens: GOG_KEYRING_PASSWORD=... gog auth tokens export email --out=tokens.json"
+    fi
     rm -f "$TOKENS_FILE"
 
-    # インポート結果を検証
+    # インポート結果を検証（gog auth list は認証済みアカウント一覧を表示する）
     echo "Verifying imported tokens..."
-    GOG_KEYRING_BACKEND=file GOG_KEYRING_PASSWORD="$GOG_KEYRING_PASSWORD" \
-        gog auth list 2>&1 || echo "WARNING: gogcli auth verification failed after import"
+    if gog auth list 2>&1; then
+        echo "gogcli auth verified"
+    else
+        echo "WARNING: gogcli auth verification failed after import"
+    fi
 fi
 
 # ============================================================
