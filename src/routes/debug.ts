@@ -413,4 +413,18 @@ debug.get('/container-config', async (c) => {
   }
 });
 
+// POST /debug/restart - Destroy the sandbox container to force re-creation with latest image
+// デプロイ後に古いイメージのコンテナが残り続ける場合に使用する。
+// sandbox.destroy() でコンテナを破棄し、次のリクエスト時に新しいイメージで再作成される。
+debug.post('/restart', async (c) => {
+  const sandbox = c.get('sandbox');
+  try {
+    await sandbox.destroy();
+    return c.json({ status: 'ok', message: 'Sandbox destroyed. Next request will create a new container.' });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    return c.json({ error: errorMessage }, 500);
+  }
+});
+
 export { debug };
