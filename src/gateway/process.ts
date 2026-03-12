@@ -44,7 +44,7 @@ export async function readStartupError(sandbox: Sandbox): Promise<string | null>
 }
 
 /**
- * Find an existing OpenClaw gateway process
+ * Find an existing ZeroClaw gateway process
  *
  * @param sandbox - The sandbox instance
  * @returns The process if found and running/starting, null otherwise
@@ -54,22 +54,20 @@ export async function findExistingMoltbotProcess(sandbox: Sandbox): Promise<Proc
     const processes = await sandbox.listProcesses();
     for (const proc of processes) {
       // Match the startup script (which wraps gateway in a watchdog loop).
-      // The script spawns `openclaw gateway` as a child process, but we track
+      // The script spawns `zeroclaw daemon` as a child process, but we track
       // the wrapper because killing it also stops the watchdog and child.
-      // Don't match individual CLI commands like "openclaw devices list".
+      // Don't match individual CLI commands like "zeroclaw status".
       const isStartupScript =
-        proc.command.includes('start-openclaw.sh') ||
-        proc.command.includes('start-moltbot.sh');
+        proc.command.includes('start-zeroclaw.sh');
       // Match the actual gateway process (child of startup script, or standalone)
       const isGatewayBinary =
-        proc.command.includes('openclaw gateway') ||
-        proc.command.includes('clawdbot gateway');
+        proc.command.includes('zeroclaw daemon') ||
+        proc.command.includes('zeroclaw gateway');
       const isCliCommand =
-        proc.command.includes('openclaw devices') ||
-        proc.command.includes('openclaw --version') ||
-        proc.command.includes('openclaw onboard') ||
-        proc.command.includes('clawdbot devices') ||
-        proc.command.includes('clawdbot --version');
+        proc.command.includes('zeroclaw --version') ||
+        proc.command.includes('zeroclaw onboard') ||
+        proc.command.includes('zeroclaw status') ||
+        proc.command.includes('zeroclaw doctor');
       // Prefer the startup script (watchdog wrapper) over the bare gateway binary.
       // Both are "gateway-related", but the startup script is the parent process.
       const isGatewayProcess = isStartupScript || (isGatewayBinary && !isCliCommand);
@@ -87,7 +85,7 @@ export async function findExistingMoltbotProcess(sandbox: Sandbox): Promise<Proc
 }
 
 /**
- * Ensure the OpenClaw gateway is running
+ * Ensure the ZeroClaw gateway is running
  *
  * This will:
  * 1. Mount R2 storage if configured
@@ -96,12 +94,12 @@ export async function findExistingMoltbotProcess(sandbox: Sandbox): Promise<Proc
  *
  * 障害パターンと対策:
  * - **Config エラーによる即座クラッシュ** (2026-02 障害): R2 から復元された config に
- *   OpenClaw が認識しないキーがあると gateway が即座にクラッシュ。start-openclaw.sh の
+ *   ZeroClaw が認識しないキーがあると gateway が即座にクラッシュ。start-zeroclaw.sh の
  *   circuit breaker が 30 秒以内に 3 回クラッシュを検知してループを停止し、
  *   /tmp/gateway-startup-error にエラー詳細を書き出す。この関数は waitForExit() で
- *   プロセスの早期終了を検出し、180 秒のタイムアウトを待たずに GatewayStartupError を throw する。
+ *   プロセスの早期終了を検出し、60 秒のタイムアウトを待たずに GatewayStartupError を throw する。
  * - **OOM / 一時的クラッシュ**: watchdog が自動再起動。uptime が長いのでカウンターはリセットされる。
- * - **ポートが開かない**: STARTUP_TIMEOUT_MS (180s) 後にタイムアウト。
+ * - **ポートが開かない**: STARTUP_TIMEOUT_MS (60s) 後にタイムアウト。
  *
  * @param sandbox - The sandbox instance
  * @param env - Worker environment bindings
@@ -124,7 +122,7 @@ export async function ensureMoltbotGateway(sandbox: Sandbox, env: MoltbotEnv): P
     );
 
     // Promise.race で「ポートが開く」か「プロセスが終了する」の早い方を待つ。
-    // config エラーで即座クラッシュする場合、waitForPort だけだと 180 秒待ち続けてしまう。
+    // config エラーで即座クラッシュする場合、waitForPort だけだと 60 秒待ち続けてしまう。
     try {
       console.log('Waiting for gateway on port', MOLTBOT_PORT, 'timeout:', STARTUP_TIMEOUT_MS);
       const portReady = existingProcess
@@ -162,10 +160,10 @@ export async function ensureMoltbotGateway(sandbox: Sandbox, env: MoltbotEnv): P
     }
   }
 
-  // Start a new OpenClaw gateway
-  console.log('Starting new OpenClaw gateway...');
+  // Start a new ZeroClaw gateway
+  console.log('Starting new ZeroClaw gateway...');
   const envVars = buildEnvVars(env);
-  const command = '/usr/local/bin/start-openclaw.sh';
+  const command = '/usr/local/bin/start-zeroclaw.sh';
 
   console.log('Starting process with command:', command);
   console.log('Environment vars being passed:', Object.keys(envVars));
@@ -183,9 +181,9 @@ export async function ensureMoltbotGateway(sandbox: Sandbox, env: MoltbotEnv): P
 
   // Wait for the gateway to be ready.
   // Promise.race で「ポートが開く」か「プロセスが終了する」の早い方を待つ。
-  // config エラーで即座クラッシュする場合、waitForPort だけだと 180 秒待ち続ける問題を解消。
+  // config エラーで即座クラッシュする場合、waitForPort だけだと 60 秒待ち続ける問題を解消。
   try {
-    console.log('[Gateway] Waiting for OpenClaw gateway to be ready on port', MOLTBOT_PORT);
+    console.log('[Gateway] Waiting for ZeroClaw gateway to be ready on port', MOLTBOT_PORT);
 
     const portReady = process
       .waitForPort(MOLTBOT_PORT, { mode: 'tcp', timeout: STARTUP_TIMEOUT_MS })
@@ -197,7 +195,7 @@ export async function ensureMoltbotGateway(sandbox: Sandbox, env: MoltbotEnv): P
     const raceResult = await Promise.race([portReady, processExited]);
 
     if (raceResult.type === 'port_ready') {
-      console.log('[Gateway] OpenClaw gateway is ready!');
+      console.log('[Gateway] ZeroClaw gateway is ready!');
       const logs = await process.getLogs();
       if (logs.stdout) console.log('[Gateway] stdout:', logs.stdout);
       if (logs.stderr) console.log('[Gateway] stderr:', logs.stderr);
@@ -216,7 +214,7 @@ export async function ensureMoltbotGateway(sandbox: Sandbox, env: MoltbotEnv): P
       }
 
       throw new GatewayStartupError(
-        `OpenClaw gateway process exited with code ${raceResult.exitCode}. Stderr: ${stderrContent || '(empty)'}`,
+        `ZeroClaw gateway process exited with code ${raceResult.exitCode}. Stderr: ${stderrContent || '(empty)'}`,
         {
           exitCode: raceResult.exitCode,
           startupErrorDetails: errorDetails ?? undefined,
@@ -231,7 +229,7 @@ export async function ensureMoltbotGateway(sandbox: Sandbox, env: MoltbotEnv): P
       console.error('[Gateway] startup failed. Stderr:', logs.stderr);
       console.error('[Gateway] startup failed. Stdout:', logs.stdout);
       throw new GatewayStartupError(
-        `OpenClaw gateway failed to start. Stderr: ${logs.stderr || '(empty)'}`,
+        `ZeroClaw gateway failed to start. Stderr: ${logs.stderr || '(empty)'}`,
         { cause: e },
       );
     } catch (logErr) {

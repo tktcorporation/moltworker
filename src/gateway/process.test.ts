@@ -6,7 +6,7 @@ import { createMockSandbox, createMockEnv, suppressConsole } from '../test-utils
 function createFullMockProcess(overrides: Partial<Process> = {}): Process {
   return {
     id: 'test-id',
-    command: 'openclaw gateway',
+    command: 'zeroclaw daemon',
     status: 'running',
     startTime: new Date(),
     endTime: undefined,
@@ -28,8 +28,8 @@ describe('findExistingMoltbotProcess', () => {
 
   it('returns null when only CLI commands are running', async () => {
     const processes = [
-      createFullMockProcess({ command: 'openclaw devices list --json', status: 'running' }),
-      createFullMockProcess({ command: 'openclaw --version', status: 'completed' }),
+      createFullMockProcess({ command: 'zeroclaw status', status: 'running' }),
+      createFullMockProcess({ command: 'zeroclaw --version', status: 'completed' }),
     ];
     const { sandbox, listProcessesMock } = createMockSandbox();
     listProcessesMock.mockResolvedValue(processes);
@@ -38,14 +38,14 @@ describe('findExistingMoltbotProcess', () => {
     expect(result).toBeNull();
   });
 
-  it('returns gateway process when running (openclaw)', async () => {
+  it('returns gateway process when running (zeroclaw)', async () => {
     const gatewayProcess = createFullMockProcess({
       id: 'gateway-1',
-      command: 'openclaw gateway --port 18789',
+      command: 'zeroclaw daemon --port 18789',
       status: 'running',
     });
     const processes = [
-      createFullMockProcess({ command: 'openclaw devices list', status: 'completed' }),
+      createFullMockProcess({ command: 'zeroclaw status', status: 'completed' }),
       gatewayProcess,
     ];
     const { sandbox, listProcessesMock } = createMockSandbox();
@@ -58,7 +58,7 @@ describe('findExistingMoltbotProcess', () => {
   it('returns gateway process when starting via startup script', async () => {
     const gatewayProcess = createFullMockProcess({
       id: 'gateway-1',
-      command: '/usr/local/bin/start-openclaw.sh',
+      command: '/usr/local/bin/start-zeroclaw.sh',
       status: 'starting',
     });
     const { sandbox, listProcessesMock } = createMockSandbox();
@@ -68,23 +68,10 @@ describe('findExistingMoltbotProcess', () => {
     expect(result).toBe(gatewayProcess);
   });
 
-  it('matches legacy clawdbot gateway command (transition compat)', async () => {
+  it('matches zeroclaw gateway command', async () => {
     const gatewayProcess = createFullMockProcess({
       id: 'gateway-1',
-      command: 'clawdbot gateway --port 18789',
-      status: 'running',
-    });
-    const { sandbox, listProcessesMock } = createMockSandbox();
-    listProcessesMock.mockResolvedValue([gatewayProcess]);
-
-    const result = await findExistingMoltbotProcess(sandbox);
-    expect(result).toBe(gatewayProcess);
-  });
-
-  it('matches legacy start-moltbot.sh command (transition compat)', async () => {
-    const gatewayProcess = createFullMockProcess({
-      id: 'gateway-1',
-      command: '/usr/local/bin/start-moltbot.sh',
+      command: 'zeroclaw gateway --port 18789',
       status: 'running',
     });
     const { sandbox, listProcessesMock } = createMockSandbox();
@@ -96,8 +83,8 @@ describe('findExistingMoltbotProcess', () => {
 
   it('ignores completed gateway processes', async () => {
     const processes = [
-      createFullMockProcess({ command: 'openclaw gateway', status: 'completed' }),
-      createFullMockProcess({ command: 'start-openclaw.sh', status: 'failed' }),
+      createFullMockProcess({ command: 'zeroclaw daemon', status: 'completed' }),
+      createFullMockProcess({ command: 'start-zeroclaw.sh', status: 'failed' }),
     ];
     const { sandbox, listProcessesMock } = createMockSandbox();
     listProcessesMock.mockResolvedValue(processes);
@@ -118,12 +105,12 @@ describe('findExistingMoltbotProcess', () => {
   it('returns first matching gateway process', async () => {
     const firstGateway = createFullMockProcess({
       id: 'gateway-1',
-      command: 'openclaw gateway',
+      command: 'zeroclaw daemon',
       status: 'running',
     });
     const secondGateway = createFullMockProcess({
       id: 'gateway-2',
-      command: 'start-openclaw.sh',
+      command: 'start-zeroclaw.sh',
       status: 'starting',
     });
     const { sandbox, listProcessesMock } = createMockSandbox();
@@ -133,9 +120,9 @@ describe('findExistingMoltbotProcess', () => {
     expect(result?.id).toBe('gateway-1');
   });
 
-  it('does not match openclaw onboard as a gateway process', async () => {
+  it('does not match zeroclaw onboard as a gateway process', async () => {
     const processes = [
-      createFullMockProcess({ command: 'openclaw onboard --non-interactive', status: 'running' }),
+      createFullMockProcess({ command: 'zeroclaw onboard --non-interactive', status: 'running' }),
     ];
     const { sandbox, listProcessesMock } = createMockSandbox();
     listProcessesMock.mockResolvedValue(processes);
@@ -172,7 +159,7 @@ describe('ensureMoltbotGateway', () => {
   it('throws GatewayStartupError when new process exits immediately', async () => {
     const mockProcess = createFullMockProcess({
       id: 'gw-1',
-      command: '/usr/local/bin/start-openclaw.sh',
+      command: '/usr/local/bin/start-zeroclaw.sh',
       status: 'running',
     });
 
@@ -207,7 +194,7 @@ describe('ensureMoltbotGateway', () => {
   it('succeeds when port becomes ready before process exits', async () => {
     const mockProcess = createFullMockProcess({
       id: 'gw-1',
-      command: '/usr/local/bin/start-openclaw.sh',
+      command: '/usr/local/bin/start-zeroclaw.sh',
       status: 'running',
     });
 
@@ -227,7 +214,7 @@ describe('ensureMoltbotGateway', () => {
   it('throws GatewayStartupError when existing process exits before port is ready', async () => {
     const existingProcess = createFullMockProcess({
       id: 'existing-1',
-      command: '/usr/local/bin/start-openclaw.sh',
+      command: '/usr/local/bin/start-zeroclaw.sh',
       status: 'running',
     });
 

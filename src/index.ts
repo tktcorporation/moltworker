@@ -264,7 +264,7 @@ app.all('*', async (c) => {
   try {
     await ensureMoltbotGateway(sandbox, c.env);
   } catch (error) {
-    console.error('[PROXY] Failed to start Moltbot:', error);
+    console.error('[PROXY] Failed to start gateway:', error);
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
 
     let hint = 'Check worker logs with: wrangler tail';
@@ -276,7 +276,7 @@ app.all('*', async (c) => {
 
     return c.json(
       {
-        error: 'Moltbot gateway failed to start',
+        error: 'Gateway failed to start',
         details: errorMessage,
         hint,
       },
@@ -289,7 +289,7 @@ app.all('*', async (c) => {
     const debugLogs = c.env.DEBUG_ROUTES === 'true';
     const redactedSearch = redactSensitiveParams(url);
 
-    console.log('[WS] Proxying WebSocket connection to Moltbot');
+    console.log('[WS] Proxying WebSocket connection to gateway');
     if (debugLogs) {
       console.log('[WS] URL:', url.pathname + redactedSearch);
     }
@@ -327,7 +327,7 @@ app.all('*', async (c) => {
 
     // Relay messages from client to container.
     // Gateway token auth is handled at the URL level (?token=... injected at line 241-243),
-    // NOT at the RPC protocol level. Newer OpenClaw versions strictly validate connect params
+    // NOT at the RPC protocol level. Newer ZeroClaw versions strictly validate connect params
     // and reject unknown properties like "token", causing:
     //   disconnected (1008): invalid connect params: at root: unexpected property 'token'
     // So we strip any "token" property from connect params to prevent this error.
@@ -343,7 +343,7 @@ app.all('*', async (c) => {
       let data = event.data;
 
       // Strip "token" from connect params — the browser Control UI may include it
-      // (read from the page URL), but newer OpenClaw gateway rejects unexpected properties.
+      // (read from the page URL), but newer ZeroClaw gateway rejects unexpected properties.
       // Auth is already handled via the URL query parameter on the wsConnect request.
       if (typeof data === 'string') {
         try {
