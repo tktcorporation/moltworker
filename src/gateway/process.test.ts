@@ -179,16 +179,10 @@ describe('ensureMoltbotGateway', () => {
 
     const env = createMockEnv();
 
-    await expect(ensureMoltbotGateway(sandbox, env)).rejects.toThrow(GatewayStartupError);
-
-    try {
-      await ensureMoltbotGateway(sandbox, env);
-    } catch (e) {
-      expect(e).toBeInstanceOf(GatewayStartupError);
-      const err = e as GatewayStartupError;
-      expect(err.exitCode).toBe(1);
-      expect(err.startupErrorDetails).toContain('circuit_breaker_open');
-    }
+    const err = await ensureMoltbotGateway(sandbox, env).catch((e) => e);
+    expect(err).toBeInstanceOf(GatewayStartupError);
+    expect(err.exitCode).toBe(1);
+    expect(err.startupErrorDetails).toContain('circuit_breaker_open');
   });
 
   it('succeeds when port becomes ready before process exits', async () => {
