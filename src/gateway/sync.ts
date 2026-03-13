@@ -22,17 +22,15 @@ function rcloneRemote(env: MoltbotEnv, prefix: string): string {
  */
 async function detectConfigDir(sandbox: Sandbox): Promise<string | null> {
   const check = await sandbox.exec(
-    'test -f /root/.openclaw/openclaw.json && echo openclaw || ' +
-      '(test -f /root/.clawdbot/clawdbot.json && echo clawdbot || echo none)',
+    'test -f /root/.zeroclaw/config.toml && echo zeroclaw || echo none',
   );
   const result = check.stdout?.trim();
-  if (result === 'openclaw') return '/root/.openclaw';
-  if (result === 'clawdbot') return '/root/.clawdbot';
+  if (result === 'zeroclaw') return '/root/.zeroclaw';
   return null;
 }
 
 /**
- * Sync OpenClaw config and workspace from container to R2 for persistence.
+ * Sync ZeroClaw config and workspace from container to R2 for persistence.
  * Uses rclone for direct S3 API access (no FUSE mount overhead).
  */
 export async function syncToR2(sandbox: Sandbox, env: MoltbotEnv): Promise<SyncResult> {
@@ -45,7 +43,7 @@ export async function syncToR2(sandbox: Sandbox, env: MoltbotEnv): Promise<SyncR
     return {
       success: false,
       error: 'Sync aborted: no config file found',
-      details: 'Neither openclaw.json nor clawdbot.json found in config directory.',
+      details: 'config.toml not found in ZeroClaw config directory.',
     };
   }
 
@@ -53,7 +51,7 @@ export async function syncToR2(sandbox: Sandbox, env: MoltbotEnv): Promise<SyncR
 
   // Sync config (rclone sync propagates deletions)
   const configResult = await sandbox.exec(
-    `rclone sync ${configDir}/ ${remote('openclaw/')} ${RCLONE_FLAGS} --exclude='*.lock' --exclude='*.log' --exclude='*.tmp' --exclude='.git/**'`,
+    `rclone sync ${configDir}/ ${remote('zeroclaw/')} ${RCLONE_FLAGS} --exclude='*.lock' --exclude='*.log' --exclude='*.tmp' --exclude='.git/**'`,
     { timeout: 120000 },
   );
   if (!configResult.success) {
@@ -66,13 +64,13 @@ export async function syncToR2(sandbox: Sandbox, env: MoltbotEnv): Promise<SyncR
 
   // Sync workspace (non-fatal, rclone sync propagates deletions)
   await sandbox.exec(
-    `test -d /root/clawd && rclone sync /root/clawd/ ${remote('workspace/')} ${RCLONE_FLAGS} --exclude='skills/**' --exclude='.git/**' || true`,
+    `test -d /root/workspace && rclone sync /root/workspace/ ${remote('workspace/')} ${RCLONE_FLAGS} --exclude='skills/**' --exclude='.git/**' || true`,
     { timeout: 120000 },
   );
 
   // Sync skills (non-fatal)
   await sandbox.exec(
-    `test -d /root/clawd/skills && rclone sync /root/clawd/skills/ ${remote('skills/')} ${RCLONE_FLAGS} || true`,
+    `test -d /root/workspace/skills && rclone sync /root/workspace/skills/ ${remote('skills/')} ${RCLONE_FLAGS} || true`,
     { timeout: 120000 },
   );
 

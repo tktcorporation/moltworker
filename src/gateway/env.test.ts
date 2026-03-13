@@ -95,10 +95,10 @@ describe('buildEnvVars', () => {
   });
 
   // Gateway token mapping
-  it('maps MOLTBOT_GATEWAY_TOKEN to OPENCLAW_GATEWAY_TOKEN for container', () => {
+  it('maps MOLTBOT_GATEWAY_TOKEN to ZEROCLAW_GATEWAY_TOKEN for container', () => {
     const env = createMockEnv({ MOLTBOT_GATEWAY_TOKEN: 'my-token' });
     const result = buildEnvVars(env);
-    expect(result.OPENCLAW_GATEWAY_TOKEN).toBe('my-token');
+    expect(result.ZEROCLAW_GATEWAY_TOKEN).toBe('my-token');
   });
 
   // Channel tokens
@@ -121,12 +121,12 @@ describe('buildEnvVars', () => {
     expect(result.SLACK_APP_TOKEN).toBe('slack-app');
   });
 
-  it('maps DEV_MODE to OPENCLAW_DEV_MODE for container', () => {
+  it('maps DEV_MODE to ZEROCLAW_DEV_MODE for container', () => {
     const env = createMockEnv({
       DEV_MODE: 'true',
     });
     const result = buildEnvVars(env);
-    expect(result.OPENCLAW_DEV_MODE).toBe('true');
+    expect(result.ZEROCLAW_DEV_MODE).toBe('true');
   });
 
   // AI Gateway model override
@@ -154,7 +154,7 @@ describe('buildEnvVars', () => {
 
     expect(result).toEqual({
       ANTHROPIC_API_KEY: 'sk-key',
-      OPENCLAW_GATEWAY_TOKEN: 'token',
+      ZEROCLAW_GATEWAY_TOKEN: 'token',
       TELEGRAM_BOT_TOKEN: 'tg',
     });
   });

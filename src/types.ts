@@ -20,14 +20,14 @@ export interface MoltbotEnv {
   ANTHROPIC_BASE_URL?: string;
   OPENAI_API_KEY?: string;
   OPENROUTER_API_KEY?: string;
-  MOLTBOT_GATEWAY_TOKEN?: string; // Gateway token (mapped to OPENCLAW_GATEWAY_TOKEN for container)
-  DEV_MODE?: string; // Set to 'true' for local dev (skips CF Access auth + openclaw device pairing)
+  MOLTBOT_GATEWAY_TOKEN?: string; // Gateway token (mapped to ZEROCLAW_GATEWAY_TOKEN for container)
+  DEV_MODE?: string; // Set to 'true' for local dev (skips CF Access auth + gateway pairing)
   E2E_TEST_MODE?: string; // Set to 'true' for E2E tests (skips CF Access auth but keeps device pairing)
   DEBUG_ROUTES?: string; // Set to 'true' to enable /debug/* routes
   SANDBOX_SLEEP_AFTER?: string; // How long before sandbox sleeps: 'never' (default), or duration like '10m', '1h'
   TELEGRAM_BOT_TOKEN?: string;
   TELEGRAM_DM_POLICY?: string;
-  TELEGRAM_DM_ALLOW_FROM?: string; // Comma-separated Telegram user IDs allowed to DM (used by start-openclaw.sh)
+  TELEGRAM_DM_ALLOW_FROM?: string; // Comma-separated Telegram user IDs allowed to DM (used by start-zeroclaw.sh)
   DISCORD_BOT_TOKEN?: string;
   DISCORD_DM_POLICY?: string;
   SLACK_BOT_TOKEN?: string;
